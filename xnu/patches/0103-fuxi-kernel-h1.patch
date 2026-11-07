@@ -789,7 +789,7 @@
  }
  
  void
-@@ -289,5 +843,276 @@
+@@ -289,5 +843,267 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -848,22 +848,32 @@
 +		}
 +	}
 +	unsigned taps = 0;
-+	
++	if (PE_parse_boot_argn("fuxitccdiag", &tccdiag, sizeof(tccdiag)) &&
++	    tccdiag > 0 && tccdiag < 3600) {
++		if (kernel_thread_start(fk_tccdiag, (void *)(uintptr_t)tccdiag, &thread) ==
++		    KERN_SUCCESS) {
++			thread_deallocate(thread);
++		} else {
++			printf("FUXI TCC: thread_start failed\n");
++		}
++	}
++	if (PE_parse_boot_argn("fuxitaps", &taps, sizeof(taps)) && taps > 0 && taps < 3600) {
++		if (kernel_thread_start(fk_taps, (void *)(uintptr_t)taps, &thread) == KERN_SUCCESS) {
++			thread_deallocate(thread);
++		} else {
++			printf("FUXI TAPS: thread_start failed\n");
++		}
++	}
++}
 +/*
 + * fuxitccdiag=S: S seconds after init, print what the kernel can see about the
 + * code signing state of the processes that decide TCC answers. Evidence only.
 + */
-+static const char *
-+fk_cs_name(proc_t p)
-+{
-+	return p->p_comm;
-+}
-+
 +static void
 +fk_tccdiag_cb(proc_t p, void *arg)
 +{
 +	(void)arg;
-+	const char *n = fk_cs_name(p);
++	const char *n = p->p_comm;
 +	if (!(strcmp(n, "assetsd") == 0 || strcmp(n, "tccd") == 0 ||
 +	    strcmp(n, "SpringBoard") == 0 || strcmp(n, "launchd") == 0 ||
 +	    strcmp(n, "MobileSlideShow") == 0 || strcmp(n, "photolibraryd") == 0)) {
@@ -885,25 +895,6 @@
 +	printf("FUXI TCC: dump at %lu s\n", (unsigned long)when);
 +	proc_iterate(PROC_ALLPROCLIST, fk_tccdiag_cb, NULL, NULL, NULL);
 +	printf("FUXI TCC: done\n");
-+}
-+
-+	if (PE_parse_boot_argn("fuxitccdiag", &tccdiag, sizeof(tccdiag)) &&
-+	    tccdiag > 0 && tccdiag < 3600) {
-+		if (kernel_thread_start(fk_tccdiag, (void *)(uintptr_t)tccdiag, &thread) ==
-+		    KERN_SUCCESS) {
-+			thread_deallocate(thread);
-+		} else {
-+			printf("FUXI TCC: thread_start failed
-+");
-+		}
-+	}
-+if (PE_parse_boot_argn("fuxitaps", &taps, sizeof(taps)) && taps > 0 && taps < 3600) {
-+		if (kernel_thread_start(fk_taps, (void *)(uintptr_t)taps, &thread) == KERN_SUCCESS) {
-+			thread_deallocate(thread);
-+		} else {
-+			printf("FUXI TAPS: thread_start failed\n");
-+		}
-+	}
 +}
 +/* Injected downs are released at the latest FUXI_KEY_INJECT_HOLD_MAX_MS later. */
 +static void
