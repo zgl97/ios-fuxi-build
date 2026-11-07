@@ -2070,6 +2070,16 @@ static int fg_scanout_publish(void)
   fg_scanout_ready = tgt; fg_scanout_cpu_pending = 0;
   if (fg_scanout_cpu_logged < 4) { fg_scanout_cpu_logged++; printf("FUXI SCANOUT: cpu flip %u->%u copy A->back, TE gated\n", fg_scanout_front, tgt); }
  }
+ if (fg_scanout_cpu_flip && fg_scanout_double_active && fg_scanout_triple_requested && fg_scanout_ready == 0) {
+  /* A GPU-path frame landed in A (ready 0): A must never be scanned while CPU writes it, so stage it
+   * into the buffer the panel is not scanning and flip there instead. */
+  unsigned tgt0 = fg_scanout_front == 2u ? 1u : 2u;
+  for (unsigned i = 0; i < 1080u*2400u; i++)
+   ((volatile uint32_t *)fg_scanout_pixels_at(tgt0))[i] = ((const volatile uint32_t *)fg_scanout_pixels)[i];
+  __asm__ volatile("dsb sy" ::: "memory");
+  fg_scanout_ready = tgt0;
+  if (fg_scanout_flip_log && fg_scanout_flip_pick_logged++ < 12) printf("FUXI SCANOUT: restage A->%u\n", tgt0);
+ }
  if (fg_scanout_double_active && !fg_scanout_select(fg_scanout_triple_requested ? fg_scanout_ready : fg_scanout_front ^ 1u))
   return fg_scanout_stop("double SRC0 flush");
  if (fg_scanout_flip_log && fg_scanout_flip_pick_logged++ < 12) {
