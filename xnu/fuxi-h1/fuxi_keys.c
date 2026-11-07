@@ -935,8 +935,7 @@ fk_tccdiag_probe(proc_t p)
 	void *blob = NULL;
 	size_t len = 0;
 	int rc = cs_entitlements_blob_get(p, &blob, &len);
-	printf("FUXI TCC: pid %d %s flags %#x ent rc=%d len=%lu blob=%p
-",
+	printf("FUXI TCC: pid %d %s flags %#x ent rc=%d len=%lu blob=%p\n",
 	    p->p_pid, n, proc_getcsflags(p), rc, (unsigned long)len, blob);
 }
 
@@ -946,8 +945,7 @@ fk_tccdiag(void *arg, wait_result_t wr)
 	uintptr_t when = (uintptr_t)arg;
 	(void)wr;
 	fk_script_sleep((uint32_t)when * 1000u);
-	printf("FUXI TCC: dump at %lu s
-", (unsigned long)when);
+	printf("FUXI TCC: dump at %lu s\n", (unsigned long)when);
 	unsigned found = 0, seen = 0;
 	for (int pid = 1; pid <= 400; pid++) {
 		proc_t p = proc_find(pid);
@@ -957,8 +955,7 @@ fk_tccdiag(void *arg, wait_result_t wr)
 		seen++;
 		const char *n = p->p_comm;
 		if (seen <= 10 && n) {
-			printf("FUXI TCC: scan pid %d comm '%s'
-", pid, n);
+			printf("FUXI TCC: scan pid %d comm '%s'\n", pid, n);
 		}
 		if (n) {
 			for (unsigned i = 0; i < sizeof(fk_tccdiag_want) / sizeof(fk_tccdiag_want[0]); i++) {
@@ -971,8 +968,7 @@ fk_tccdiag(void *arg, wait_result_t wr)
 		}
 		proc_rele(p);
 	}
-	printf("FUXI TCC: done, seen %u procs, matched %u
-", seen, found);
+	printf("FUXI TCC: done, seen %u procs, matched %u\n", seen, found);
 }
 /* Injected downs are released at the latest FUXI_KEY_INJECT_HOLD_MAX_MS later. */
 static void
