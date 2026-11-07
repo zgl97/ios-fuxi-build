@@ -51,6 +51,8 @@ extern int sweet_hid_touch_mode(void);
 extern void fuxi_perf_input(void);
 void fuxi_keys_init(void);
 static unsigned tccdiag;
+static void fk_tccdiag(void *arg, wait_result_t wr);
+static void fk_tccdiag_cb(proc_t p, void *arg);
 bool fuxi_keys_touch_wake(void);
 
 #define FK_CORE_PA     0x0c400000u
