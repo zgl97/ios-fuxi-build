@@ -1628,7 +1628,7 @@
 +#endif
 --- a/bsd/dev/fuxi_gpu_scanout.inc
 +++ b/bsd/dev/fuxi_gpu_scanout.inc
-@@ -0,0 +1,2397 @@
+@@ -0,0 +1,2394 @@
 +/* SPDX-License-Identifier: MIT
 + * Copyright (c) 2026 NativeMetal contributors
 + * Ported from UniXNU drivers/NativeMetal/GpuScanoutClient.h (MIT).
@@ -1736,6 +1736,7 @@
 +/* fuxiscancpuflip=1: the panel scans a copy (B/C) while the CPU writer keeps fPixels=A; publish copies A into
 + * the back buffer and STARTs it on the TE gate, so a CPU frame is never scanned while it is written. */
 +static unsigned fg_scanout_cpu_flip, fg_scanout_cpu_pending, fg_scanout_cpu_logged;
++static unsigned fg_scanout_flip_log, fg_scanout_flip_addr_logged, fg_scanout_flip_pick_logged;
 +static unsigned fg_scanout_target(void)
 +{
 + for (unsigned i = 0; i < (fg_scanout_triple_requested ? 3u : 2u); i++)
@@ -2427,11 +2428,9 @@
 +}
 +static int fg_dpu_geometry(const unsigned g[4]);
 +/* Preserve other pending flush bits; VIG0 is CTL_FLUSH bit0. After a direct slot (bit 24) A's geometry comes back with the address. */
-+static unsigned fg_scanout_flip_log, fg_scanout_flip_addr_logged, fg_scanout_flip_pick_logged;
 +static int fg_scanout_address(unsigned pa)
 +{
-+ if (fg_scanout_flip_log && fg_scanout_flip_addr_logged++ < 12) printf("FUXI SCANOUT: addr %#x
-+", pa);
++ if (fg_scanout_flip_log && fg_scanout_flip_addr_logged++ < 12) printf("FUXI SCANOUT: addr %#x\n", pa);
 + unsigned flush;
 + if (fg_dd_geo) {
 +  unsigned g[4] = {fg_dd_ga[0], fg_dd_ga[1], fg_dd_ga[2], pa};
@@ -2512,8 +2511,7 @@
 + * disables: translation fault, FSYNR0 PLVL 0; sheng i564's level-0 fault was the same TCR2 5); the window's leaves start empty so a
 + * stray IOVA fetch faults; translation is switched only while CTL START is clear and the write line idle, and is switched off only
 + * after A (identity) is latched again. Never written: SMRs, S2CRs, CBAR/CBA2R, any global register or global TLB invalidate (apps_smmu
-+ * also serves touch, WLAN and UFS); bank writes are limited to the offsets in fg_dpu_cb_wr. Steps, each logged as "FUXI SCANOUT: dpu
-+ * stage2 ...": check idle and SRC0 = CURRENT_SRC0 = A; find the bank; allocate the table and a wired 1125x2436 test surface (stride 4608,
++ * also serves touch, WLAN and UFS); bank writes are limited to the offsets in fg_dpu_cb_wr. Steps, each logged as "FUXI SCANOUT: dpu\n* stage2 ...": check idle and SRC0 = CURRENT_SRC0 = A; find the bank; allocate the table and a wired 1125x2436 test surface (stride 4608,
 + * scattered pages); install TTBR0/TCR2/TCR/MAIR0, bank TLBIALL, SCTLR M|CFRE|CFIE; FG_DPU_STARTS STARTs on A through the identity blocks
 + * with FSR checked after each; map the surface into the window (bank TLBIALL); point VIG0 at it with the logical-to-panel crop and START
 + * once; hold 2 s watching FSR; restore A's geometry and START (still translated); restore the bank registers and compare them with the
@@ -3708,8 +3706,7 @@
 + if (fg_scanout_flip_log && fg_scanout_flip_pick_logged++ < 12) {
 +  unsigned pick_src = 0;
 +  (void)fg_scanout_read(0xae05014, &pick_src);
-+  printf("FUXI SCANOUT: pick front %u ready %u src %#x
-+", fg_scanout_front, fg_scanout_ready, pick_src);
++  printf("FUXI SCANOUT: pick front %u ready %u src %#x\n", fg_scanout_front, fg_scanout_ready, pick_src);
 + }
 + if (!arm_on && !fg_scanout_write(FG_SCAN_CTL+0x1c, 1)) return fg_scanout_stop("start transfer");
 + fg_scanout_probe_t0 = rsr("cntpct_el0");
