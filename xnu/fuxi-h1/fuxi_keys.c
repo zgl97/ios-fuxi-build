@@ -31,6 +31,8 @@
 #include <sys/systm.h>
 #include <sys/errno.h>
 #include <sys/kauth.h>
+#include <sys/codesign.h>
+#include <sys/proc_internal.h>
 #include <sys/sysctl.h>
 #include <kern/clock.h>
 #include <kern/locks.h>
@@ -48,6 +50,7 @@ extern void sweet_hid_key_at(int key, int down, uint64_t timestamp);
 extern int sweet_hid_touch_mode(void);
 extern void fuxi_perf_input(void);
 void fuxi_keys_init(void);
+static unsigned tccdiag;
 bool fuxi_keys_touch_wake(void);
 
 #define FK_CORE_PA     0x0c400000u
@@ -895,7 +898,56 @@ fuxi_keys_init(void)
 		}
 	}
 	unsigned taps = 0;
-	if (PE_parse_boot_argn("fuxitaps", &taps, sizeof(taps)) && taps > 0 && taps < 3600) {
+	
+/*
+ * fuxitccdiag=S: S seconds after init, print what the kernel can see about the
+ * code signing state of the processes that decide TCC answers. Evidence only.
+ */
+static const char *
+fk_cs_name(proc_t p)
+{
+	return p->p_comm;
+}
+
+static void
+fk_tccdiag_cb(proc_t p, void *arg)
+{
+	(void)arg;
+	const char *n = fk_cs_name(p);
+	if (!(strcmp(n, "assetsd") == 0 || strcmp(n, "tccd") == 0 ||
+	    strcmp(n, "SpringBoard") == 0 || strcmp(n, "launchd") == 0 ||
+	    strcmp(n, "MobileSlideShow") == 0 || strcmp(n, "photolibraryd") == 0)) {
+		return;
+	}
+	void *blob = NULL;
+	size_t len = 0;
+	int rc = cs_entitlements_blob_get(p, &blob, &len);
+	printf("FUXI TCC: pid %d %s flags %#x ent rc=%d len=%lu blob=%p\n",
+	    p->p_pid, n, proc_getcsflags(p), rc, (unsigned long)len, blob);
+}
+
+static void
+fk_tccdiag(void *arg, wait_result_t wr)
+{
+	uintptr_t when = (uintptr_t)arg;
+	(void)wr;
+	fk_script_sleep((uint32_t)when * 1000u);
+	printf("FUXI TCC: dump at %lu s\n", (unsigned long)when);
+	proc_iterate(PROC_ALLPROCLIST, fk_tccdiag_cb, NULL, NULL, NULL);
+	printf("FUXI TCC: done\n");
+}
+
+	if (PE_parse_boot_argn("fuxitccdiag", &tccdiag, sizeof(tccdiag)) &&
+	    tccdiag > 0 && tccdiag < 3600) {
+		if (kernel_thread_start(fk_tccdiag, (void *)(uintptr_t)tccdiag, &thread) ==
+		    KERN_SUCCESS) {
+			thread_deallocate(thread);
+		} else {
+			printf("FUXI TCC: thread_start failed
+");
+		}
+	}
+if (PE_parse_boot_argn("fuxitaps", &taps, sizeof(taps)) && taps > 0 && taps < 3600) {
 		if (kernel_thread_start(fk_taps, (void *)(uintptr_t)taps, &thread) == KERN_SUCCESS) {
 			thread_deallocate(thread);
 		} else {
