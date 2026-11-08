@@ -1215,6 +1215,9 @@ struct fw_rsc_layout {
 
 static uint32_t fw_stage;
 
+static void fw_mhi_probe(volatile uint32_t *patu, volatile uint32_t *pcfg, volatile uint32_t *pdbi);
+static void fw_mhi_regs(volatile uint32_t *m, uint32_t span);
+
 static const uint32_t fw_branches[] = {
 	0x6b020, 0x6b02c, 0x6b038, 0x6b03c, 0x6b048,
 	0x6b01c, 0x10030, 0x1003c, 0x1004c, 0x6b054,
