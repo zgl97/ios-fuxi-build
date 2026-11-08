@@ -792,7 +792,7 @@
  }
  
  void
-@@ -289,5 +846,1000 @@
+@@ -289,5 +846,1003 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1164,6 +1164,9 @@
 +};
 +
 +static uint32_t fw_stage;
++
++static void fw_mhi_probe(volatile uint32_t *patu, volatile uint32_t *pcfg, volatile uint32_t *pdbi);
++static void fw_mhi_regs(volatile uint32_t *m, uint32_t span);
 +
 +static const uint32_t fw_branches[] = {
 +	0x6b020, 0x6b02c, 0x6b038, 0x6b03c, 0x6b048,
