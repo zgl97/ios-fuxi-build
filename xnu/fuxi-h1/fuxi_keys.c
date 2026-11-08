@@ -1132,23 +1132,26 @@ fuxi_keys_touch_wake(void)
 	}
 	return go;
 }
+
 /*
  * WiFi stage 1: a read-only look at what the boot loaders left of the
- * WCN7850 path on the fuxi board (boot-arg fuxiwifiprobe).
+ * WCN7850 path on the fuxi board (boot-arg fuxiwifiprobe=STAGE).
  * Hardware facts from the live DT (build/live.dtb): GCC 0x100000, PCIe0 PARF
- * 0x1c00000, PHY 0x1c06000, DBI 0x60000000, pinctrl@f000000 (0x1000000);
+ * 0x1c00000, PHY 0x1c06000, DBI 0x60000000, pinctrl@f000000 (16 MiB);
  * WLAN_EN GPIO 80, SW_CTRL GPIO 82, PERST# GPIO 94 (active low), WAKE# GPIO 96.
- * The register map and the stage-1 flow come from UniXNU-sheng's
- * package/WifiProbe.cpp (BSD-2-Clause-Patent): the clock votes in
- * 0x52008/0x52000, the PCIe0 GDSC at 0x6b004 (bit 31 PWR_ON) and the branch
- * halt registers fw_branches. The controller registers are read only when the
- * GDSC is on and the four branches (slv_axi, mstr_axi, cfg_ahb, aux) run: a
- * read of an unclocked block stalls the bus, so everything else is skipped.
+ *
+ * The register map and the flow come from UniXNU-sheng's package/WifiProbe.cpp
+ * (BSD-2-Clause-Patent). Its warning applies here too: "a read of an unclocked
+ * block stalls the bus", so every block is staged and announced first:
+ *   stage 1  GCC votes, PCIe0 GDSC and branch halt registers (always clocked)
+ *   stage 2  TLMM pin config words (only if asked; the key driver talks GPIO
+ *            over SPMI, so the TLMM may be unclocked on this board)
+ *   stage 3  PCIe0 PARF/DBI, and only when the GDSC is on and the four
+ *            required branches run
  * Nothing here writes a register.
  */
 #define FW_GCC		0x00100000ULL
-#define FW_TLMM_F	0x0f000000ULL
-#define FW_TLMM_F1	0x0f100000ULL
+#define FW_TLMM		0x0f000000ULL
 #define FW_PARF		0x01c00000ULL
 #define FW_DBI		0x60000000ULL
 #define FW_VOTE8	0x52008u
@@ -1166,37 +1169,24 @@ static const uint32_t fw_branches[] = {
 };
 static const unsigned fw_pins[] = { 80, 82, 94 };
 
-static uint32_t
-fk_wifi_pinword(volatile uint32_t *tlmm)
-{
-	uint32_t word = 0;
-	unsigned i;
-
-	for (i = 0; i < sizeof fw_pins / sizeof fw_pins[0]; i++) {
-		word |= (tlmm[(fw_pins[i] * 0x1000u + 4u) / 4u] & 3u) << (8u * i);
-	}
-	return word;
-}
-
 static void
 fk_wifi_thread(void *arg, wait_result_t wr)
 {
-	volatile uint32_t *gcc, *tlmm, *tlmm1, *parf, *dbi;
+	volatile uint32_t *gcc;
 	uint32_t vote8, vote0, gdsc, halt = 0, needed;
+	unsigned stage = (unsigned)(uintptr_t)arg;
 	unsigned i;
 
-	(void)arg;
 	(void)wr;
 	thread_set_thread_name(current_thread(), "fuxi-wifi");
+	printf("FUXI WIFI: stage %u starting\n", stage);
 
+	printf("FUXI WIFI: mapping gcc\n");
 	gcc = (volatile uint32_t *)ml_io_map(FW_GCC, 0x80000);
-	tlmm = (volatile uint32_t *)ml_io_map(FW_TLMM_F, 0x100000);
-	tlmm1 = (volatile uint32_t *)ml_io_map(FW_TLMM_F1, 0x100000);
-	if (!gcc || !tlmm) {
-		printf("FUXI WIFI: map failed gcc %p tlmm %p\n", gcc, tlmm);
+	if (!gcc) {
+		printf("FUXI WIFI: gcc map failed\n");
 		return;
 	}
-
 	vote8 = gcc[FW_VOTE8 / 4u];
 	vote0 = gcc[FW_VOTE0 / 4u];
 	gdsc = gcc[FW_GDSC / 4u];
@@ -1205,27 +1195,45 @@ fk_wifi_thread(void *arg, wait_result_t wr)
 			halt |= 1u << i;
 		}
 	}
-	needed = (halt & 0xfu);
-
+	needed = halt & 0xfu;
 	printf("FUXI WIFI: gcc vote8 %#x vote0 %#x gdsc %#x halt %#x\n",
 	    vote8, vote0, gdsc, halt);
-	printf("FUXI WIFI: tlmm@f000000 %#x tlmm@f100000 %#x\n",
-	    fk_wifi_pinword(tlmm), tlmm1 ? fk_wifi_pinword(tlmm1) : 0);
 
-	if ((gdsc & (1u << 31)) && needed == 0) {
-		parf = (volatile uint32_t *)ml_io_map(FW_PARF, 0x3000);
-		dbi = (volatile uint32_t *)ml_io_map(FW_DBI, 0x1000);
-		if (parf && dbi) {
-			printf("FUXI WIFI: parf ltssm %#x phyctl %#x\n",
-			    parf[FW_PARF_LTSSM / 4u], parf[FW_PARF_PHYCTL / 4u]);
-			printf("FUXI WIFI: ep vendor %#x device %#x link %#x\n",
-			    dbi[0], dbi[1], dbi[FW_LINK_CONTROL / 4u]);
+	if (stage >= 2) {
+		volatile uint32_t *tlmm;
+		uint32_t word = 0;
+
+		printf("FUXI WIFI: mapping tlmm@f000000\n");
+		tlmm = (volatile uint32_t *)ml_io_map(FW_TLMM, 0x1000000);
+		if (tlmm) {
+			for (i = 0; i < sizeof fw_pins / sizeof fw_pins[0]; i++) {
+				word |= (tlmm[(fw_pins[i] * 0x1000u + 4u) / 4u] & 3u) << (8u * i);
+			}
+			printf("FUXI WIFI: tlmm pins %#x\n", word);
 		} else {
-			printf("FUXI WIFI: parf/dbi map failed %p %p\n", parf, dbi);
+			printf("FUXI WIFI: tlmm map failed\n");
 		}
-	} else {
-		printf("FUXI WIFI: controller read skipped (gdsc on %u, clocks off %#x)\n",
-		    (gdsc >> 31) & 1u, needed);
+	}
+
+	if (stage >= 3) {
+		if ((gdsc & (1u << 31)) && needed == 0) {
+			volatile uint32_t *parf, *dbi;
+
+			printf("FUXI WIFI: mapping parf/dbi\n");
+			parf = (volatile uint32_t *)ml_io_map(FW_PARF, 0x3000);
+			dbi = (volatile uint32_t *)ml_io_map(FW_DBI, 0x1000);
+			if (parf && dbi) {
+				printf("FUXI WIFI: parf ltssm %#x phyctl %#x\n",
+				    parf[FW_PARF_LTSSM / 4u], parf[FW_PARF_PHYCTL / 4u]);
+				printf("FUXI WIFI: ep vendor %#x device %#x link %#x\n",
+				    dbi[0], dbi[1], dbi[FW_LINK_CONTROL / 4u]);
+			} else {
+				printf("FUXI WIFI: parf/dbi map failed\n");
+			}
+		} else {
+			printf("FUXI WIFI: controller read skipped (gdsc on %u, clocks off %#x)\n",
+			    (gdsc >> 31) & 1u, needed);
+		}
 	}
 	printf("FUXI WIFI: stage 1 done\n");
 }
@@ -1233,13 +1241,13 @@ fk_wifi_thread(void *arg, wait_result_t wr)
 void
 fuxi_wifi_probe_init(void)
 {
-	unsigned delay = 0;
+	unsigned stage = 0;
 	thread_t thread = THREAD_NULL;
 
-	if (!PE_parse_boot_argn("fuxiwifiprobe", &delay, sizeof delay) || delay == 0) {
+	if (!PE_parse_boot_argn("fuxiwifiprobe", &stage, sizeof stage) || stage == 0) {
 		return;
 	}
-	if (kernel_thread_start(fk_wifi_thread, NULL, &thread) == KERN_SUCCESS) {
+	if (kernel_thread_start(fk_wifi_thread, (void *)(uintptr_t)stage, &thread) == KERN_SUCCESS) {
 		thread_deallocate(thread);
 	} else {
 		printf("FUXI WIFI: thread start failed\n");
