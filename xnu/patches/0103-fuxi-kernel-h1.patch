@@ -792,7 +792,7 @@
  }
  
  void
-@@ -289,5 +846,907 @@
+@@ -289,5 +846,1000 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1140,6 +1140,9 @@
 +#define FW_PHYGDSC	0x6c000u
 +#define FW_VOTE8B	0x7fu
 +#define FW_VOTE0B	((1u << 12) | (1u << 19) | (1u << 22))
++#define FW_MEMBASE	0x60300000u
++#define FW_MEMSIZE	0x3d00000u
++#define FW_MHI_SZ	0x200000u
 +#define FW_PARF_SZ	0x3000u
 +#define FW_DBI		0x60000000ULL
 +#define FW_DBI_SZ	0x1000u
@@ -1159,6 +1162,8 @@
 +	uint32_t tcs_stride, cmd_stride, irq_status, irq_clear, wait_for_cmpl,
 +	    control, status, cmd_enable, cmd_msgid, cmd_addr, cmd_data;
 +};
++
++static uint32_t fw_stage;
 +
 +static const uint32_t fw_branches[] = {
 +	0x6b020, 0x6b02c, 0x6b038, 0x6b03c, 0x6b048,
@@ -1654,7 +1659,94 @@
 +	}
 +	c = (volatile uint32_t *)base;
 +	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
-+	printf("FUXI WIFI: stage 4 done\n");
++	if (fw_stage >= 5) {
++		fw_mhi_probe(a, c, d);
++	} else {
++		printf("FUXI WIFI: stage 4 done\n");
++	}
++}
++
++/* Stage 5: forward the iATU's memory window to bus 1, give the endpoint's BAR0 an address inside it,
++ * turn memory decoding and bus mastering on, and read the MHI registers the BAR starts with. Still
++ * read-only: nothing is written to the MHI block or below it. */
++static void
++fw_mhi_regs(volatile uint32_t *m, uint32_t span)
++{
++	uint32_t bhi, bhie, level5 = 0;
++
++	printf("FUXI MHI: reglen %#x imglow %#x imgsize %#x bhioff %#x bhieoff %#x\n",
++	    m[0x00 / 4], m[0x08 / 4], m[0x10 / 4], m[0x28 / 4], m[0x2c / 4]);
++	printf("FUXI MHI: ctrl %#x status %#x state %#x\n", m[0x38 / 4], m[0x48 / 4],
++	    (m[0x48 / 4] >> 8) & 0xffu);
++	bhi = m[0x28 / 4];
++	bhie = m[0x2c / 4];
++	if (bhi && bhi < span - 0x40) {
++		printf("FUXI MHI: bhi execenv %#x status %#x errcode %#x intvec %#x\n",
++		    m[(bhi + 0x28) / 4], m[(bhi + 0x2c) / 4], m[(bhi + 0x30) / 4],
++		    m[(bhi + 0x20) / 4]);
++		printf("FUXI MHI: bhi imgaddr %#x size %#x txdb %#x\n",
++		    m[(bhi + 0x08) / 4], m[(bhi + 0x10) / 4], m[(bhi + 0x18) / 4]);
++	}
++	if (bhie && bhie < span - 0x48) {
++		printf("FUXI MHI: bhie vecaddr %#x/%#x vecsize %#x vecdb %#x vecstatus %#x\n",
++		    m[(bhie + 0x2c) / 4], m[(bhie + 0x30) / 4], m[(bhie + 0x34) / 4],
++		    m[(bhie + 0x3c) / 4], m[(bhie + 0x44) / 4]);
++	}
++	if (PE_parse_boot_argn("fuximhi", &level5, sizeof level5))
++		printf("FUXI MHI: level %u\n", level5);
++}
++
++static void
++fw_mhi_probe(volatile uint32_t *patu, volatile uint32_t *pcfg, volatile uint32_t *pdbi)
++{
++	volatile uint32_t *r1, *m;
++	vm_offset_t base;
++	uint32_t mask, size, address, command;
++
++	printf("FUXI MHI: stage 5 starting\n");
++	/* region 1: CPU window to the same PCI addresses the devices see */
++	r1 = patu + 0x200 / 4;
++	r1[0x08 / 4] = FW_MEMBASE;
++	r1[0x0c / 4] = 0;
++	r1[0x10 / 4] = FW_MEMBASE + FW_MEMSIZE - 1;
++	r1[0x20 / 4] = 0;
++	r1[0x14 / 4] = FW_MEMBASE;
++	r1[0x18 / 4] = 0;
++	r1[0x00 / 4] = 0x0;
++	r1[0x04 / 4] = 1u << 31;
++	for (size = 0; size < 5 && !(r1[0x04 / 4] & (1u << 31)); size++)
++		delay(10);
++	/* type 1 header memory base/limit so the root port forwards bus 1's memory */
++	pdbi[0x20 / 4] = ((FW_MEMBASE + FW_MEMSIZE - 1) & 0xfff00000u) |
++	    ((FW_MEMBASE >> 16) & 0xfff0u);
++	/* BAR0: size it while it decodes nothing, then put it at the start of the window */
++	mask = pcfg[0x10 / 4];
++	pcfg[0x10 / 4] = 0xffffffffu;
++	mask = pcfg[0x10 / 4];
++	pcfg[0x10 / 4] = 0;
++	if ((mask & ~0xfu) == 0) {
++		printf("FUXI MHI: bar0 not implemented (%#x)\n", mask);
++		return;
++	}
++	size = ~(mask & ~0xfu) + 1;
++	if (size > FW_MHI_SZ)
++		size = FW_MHI_SZ;
++	address = (FW_MEMBASE + size - 1) & ~(size - 1);
++	pcfg[0x10 / 4] = address | (mask & 0xfu);
++	if ((mask & 6u) == 4u)
++		pcfg[0x14 / 4] = 0;
++	command = (pcfg[0x04 / 4] & 0xffff0000u) | 0x6u;
++	pcfg[0x04 / 4] = command;
++	printf("FUXI MHI: bar0 mask %#x size %#x address %#x command %#x\n", mask, size,
++	    address, command);
++	base = ml_io_map(address, size);
++	if (base == 0) {
++		printf("FUXI MHI: bar map failed\n");
++		return;
++	}
++	m = (volatile uint32_t *)base;
++	fw_mhi_regs(m, size);
++	printf("FUXI MHI: stage 5 done\n");
 +}
 +
 +static void
@@ -1677,6 +1769,7 @@
 +		fw_wifi_power();
 +	}
 +	if (stage >= 4) {
++		fw_stage = stage;
 +		printf("FUXI WIFI: stage 4 starting\n");
 +		fw_pcie_up();
 +	}
