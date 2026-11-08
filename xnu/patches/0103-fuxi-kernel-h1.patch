@@ -792,7 +792,7 @@
  }
  
  void
-@@ -289,5 +846,555 @@
+@@ -289,5 +846,635 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1310,6 +1310,85 @@
 +	    (uint32_t)((1u << (sizeof fw_rails / sizeof fw_rails[0])) - 1u));
 +}
 +
++/* --- WiFi stage 3: WLAN_EN / PERST# / CLKREQ# pins and the two PCIe GDSCs. Both blocks are
++ * clocked by the always-on TLMM and GCC top, so the writes are safe before the PCIe clocks run. */
++static void
++fw_tlmm_pin(volatile uint32_t *t, unsigned pin, uint32_t cfg, int level)
++{
++	if (level >= 0)
++		t[(pin * 0x1000 + 4) / 4] = (uint32_t)(level ? 2u : 0u);
++	t[pin * 0x1000 / 4] = cfg;
++	if (level >= 0)
++		t[(pin * 0x1000 + 4) / 4] = (uint32_t)(level ? 2u : 0u);
++}
++
++static uint32_t
++fw_tlmm_word(volatile uint32_t *t)
++{
++	uint32_t w = 0;
++
++	w |= t[(FW_WLAN_EN * 0x1000 + 4) / 4] & 3u;
++	w |= (t[(FW_PERST * 0x1000 + 4) / 4] & 3u) << 8;
++	w |= (t[(FW_CLKREQ * 0x1000 + 4) / 4] & 3u) << 16;
++
++	return w;
++}
++
++static void
++fw_wifi_power(void)
++{
++	vm_offset_t base;
++	volatile uint32_t *g, *t;
++	unsigned tries;
++	uint32_t power;
++
++	base = ml_io_map(FW_TLMM, FW_TLMM_SZ);
++	if (base == 0) {
++		printf("FUXI WIFI: tlmm map failed %#llx\n", (unsigned long long)FW_TLMM);
++		return;
++	}
++	t = (volatile uint32_t *)base;
++	printf("FUXI WIFI: stage 3 pin word %#x\n", fw_tlmm_word(t));
++
++	/* PERST# is active low: hold the endpoint in reset while the chip is powered up. */
++	printf("FUXI WIFI: perst %u low\n", FW_PERST);
++	fw_tlmm_pin(t, FW_PERST, 1u | 1u << 9, 0);
++	/* CLKREQ# belongs to the PCIe function: function 3, pull up, no output. */
++	fw_tlmm_pin(t, FW_CLKREQ, 3u | 1u << 2, -1);
++	/* Drop WLAN_EN first so the chip starts from nothing, then power it (pwrseq-qcom-wcn: 50 ms). */
++	printf("FUXI WIFI: wlan_en %u low, 150 ms\n", FW_WLAN_EN);
++	fw_tlmm_pin(t, FW_WLAN_EN, 1u | 3u << 6 | 1u << 9, 0);
++	delay(150000);
++	printf("FUXI WIFI: wlan_en %u high, 60 ms\n", FW_WLAN_EN);
++	fw_tlmm_pin(t, FW_WLAN_EN, 1u | 3u << 6 | 1u << 9, 1);
++	delay(60000);
++	printf("FUXI WIFI: pin word after %#x perst cfg %#x/%#x wlan_en cfg %#x/%#x\n",
++	    fw_tlmm_word(t),
++	    t[FW_PERST * 0x1000 / 4], t[(FW_PERST * 0x1000 + 4) / 4],
++	    t[FW_WLAN_EN * 0x1000 / 4], t[(FW_WLAN_EN * 0x1000 + 4) / 4]);
++
++	base = ml_io_map(FW_GCC, FW_GCC_SZ);
++	if (base == 0) {
++		printf("FUXI WIFI: gcc map failed\n");
++		return;
++	}
++	g = (volatile uint32_t *)base;
++	/* A set bit in the collapse register keeps a GDSC collapsed: clear PCIe0 (bit 0) and PHY (bit 3). */
++	printf("FUXI WIFI: gdsc collapse before %#x pcie0 %#x phy %#x\n",
++	    g[0x52020 / 4], g[0x6b004 / 4], g[0x6c000 / 4]);
++	g[0x52020 / 4] &= ~(1u << 0 | 1u << 3);
++	for (tries = 0; tries < 100; tries++) {
++		power = (g[0x6b004 / 4] >> 31) | ((g[0x6c000 / 4] >> 31) << 1);
++		if (power == 3)
++			break;
++		delay(10000);
++	}
++	printf("FUXI WIFI: gdsc after %u tries pcie0 %#x phy %#x power %u\n",
++	    tries, g[0x6b004 / 4], g[0x6c000 / 4],
++	    (uint32_t)((g[0x6b004 / 4] >> 31) | ((g[0x6c000 / 4] >> 31) << 1)));
++	printf("FUXI WIFI: stage 3 done\n");
++}
++
 +static void
 +fk_wifi_thread(void *arg, wait_result_t wr)
 +{
@@ -1326,7 +1405,8 @@
 +		fw_read_gcc("after");
 +	}
 +	if (stage >= 3) {
-+		printf("FUXI WIFI: stage 3 not implemented yet\n");
++		printf("FUXI WIFI: powering pins and GDSCs\n");
++		fw_wifi_power();
 +	}
 +	printf("FUXI WIFI: probe done\n");
 +}
