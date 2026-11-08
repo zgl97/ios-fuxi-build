@@ -50,6 +50,7 @@ extern void sweet_hid_key_at(int key, int down, uint64_t timestamp);
 extern int sweet_hid_touch_mode(void);
 extern void fuxi_perf_input(void);
 void fuxi_keys_init(void);
+void fuxi_wifi_probe_init(void); /* bsd/dev/fuxi_wifi.c: stage 1, fuxiwifiprobe */
 static unsigned tccdiag;
 static void fk_tccdiag(void *arg, wait_result_t wr);
 static void fk_tccdiag_probe(proc_t p);
@@ -916,6 +917,7 @@ fuxi_keys_init(void)
 			printf("FUXI TAPS: thread_start failed\n");
 		}
 	}
+	fuxi_wifi_probe_init();
 }
 /*
  * fuxitccdiag=S: S seconds after init, print what the kernel can see about the
