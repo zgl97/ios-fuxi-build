@@ -41,6 +41,10 @@
 #include <kern/sched_prim.h>
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
+#include <sys/vnode.h>
+#include <sys/namei.h>
+#include <sys/uio.h>
+#include <sys/vfs_context.h>
 #include "sweet_spmi_bus.h"
 #include "fuxi_key_state.h"
 
@@ -1214,6 +1218,9 @@ struct fw_rsc_layout {
 };
 
 static uint32_t fw_stage;
+static vm_offset_t bar0;
+static void fw_bhi_boot(volatile uint32_t *);
+static uint32_t fw_read_file(const char *, vm_offset_t, uint32_t);
 
 static void fw_mhi_probe(volatile uint32_t *patu, volatile uint32_t *pcfg, volatile uint32_t *pdbi);
 static void fw_mhi_regs(volatile uint32_t *m, uint32_t span);
@@ -1714,6 +1721,8 @@ fw_pcie_up(void)
 	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
+		if (fw_stage >= 6)
+			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
 	} else {
 		printf("FUXI WIFI: stage 4 done\n");
 	}
@@ -1747,6 +1756,105 @@ fw_mhi_regs(volatile uint32_t *m, uint32_t span)
 	}
 	if (PE_parse_boot_argn("fuximhi", &level5, sizeof level5))
 		printf("FUXI MHI: level %u\n", level5);
+}
+
+#define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
+#define FW_FW_WIN	0x2000000u
+#define FW_SBL		0x80000u	/* ath12k: sbl_size = SZ_512K */
+
+static uint32_t
+fw_read_file(const char *path, vm_offset_t buf, uint32_t cap)
+{
+	vfs_context_t ctx;
+	vnode_t vp = NULL;
+	struct vnode_attr va;
+	int error, resid = 0;
+	uint32_t size;
+
+	ctx = vfs_context_create(NULL);
+	if (ctx == NULL)
+		return 0;
+	error = vnode_lookup(path, 0, &vp, ctx);
+	if (error) {
+		printf("FUXI MHI: lookup %s failed %d\n", path, error);
+		vfs_context_rele(ctx);
+		return 0;
+	}
+	VATTR_INIT(&va);
+	VATTR_WANTED(&va, va_data_size);
+	error = vnode_getattr(vp, &va, ctx);
+	if (error) {
+		printf("FUXI MHI: getattr %s failed %d\n", path, error);
+		vnode_put(vp);
+		vfs_context_rele(ctx);
+		return 0;
+	}
+	size = (uint32_t)va.va_data_size;
+	printf("FUXI MHI: %s size %u\n", path, size);
+	if (size > cap)
+		size = cap;
+	error = vn_rdwr(UIO_READ, vp, (caddr_t)buf, (int)size, 0, UIO_SYSSPACE,
+	    IO_NODELOCKED | IO_UNIT, ctx, &resid, NULL);
+	printf("FUXI MHI: read %s -> %d resid %d\n", path, error, resid);
+	vnode_put(vp);
+	vfs_context_rele(ctx);
+	if (error)
+		return 0;
+	return size - (uint32_t)resid;
+}
+
+/* Stage 6: hand the first 512 KiB of amss.bin to the PBL through BHI and wait for the
+ * transfer to complete. The SBL then brings the part up and asks for the rest over BHIe. */
+static void
+fw_bhi_boot(volatile uint32_t *m)
+{
+	volatile uint32_t *bhi;
+	vm_offset_t win;
+	uint32_t span, bhioff, size, status = 0, i;
+	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
+
+	printf("FUXI MHI: stage 6 starting\n");
+	span = m[0x00 / 4];
+	if (span == 0 || span > 0x10000)
+		span = 0x10000;
+	win = ml_io_map((vm_offset_t)FW_FW_BASE, FW_FW_WIN);
+	if (win == 0) {
+		printf("FUXI MHI: firmware window map failed\n");
+		return;
+	}
+	size = fw_read_file(path, win, FW_FW_WIN);
+	if (size == 0) {
+		printf("FUXI MHI: no firmware\n");
+		return;
+	}
+	printf("FUXI MHI: fw at %#llx size %u first words %#x %#x %#x %#x\n",
+	    (unsigned long long)FW_FW_BASE, size,
+	    ((volatile uint32_t *)win)[0], ((volatile uint32_t *)win)[1],
+	    ((volatile uint32_t *)win)[2], ((volatile uint32_t *)win)[3]);
+	bhioff = m[0x28 / 4];
+	if (bhioff == 0 || bhioff >= span - 0xc8) {
+		printf("FUXI MHI: bad bhi offset %#x\n", bhioff);
+		return;
+	}
+	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
+	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
+	bhi[0x2c / 4] = 0;
+	bhi[0x0c / 4] = 0;
+	bhi[0x08 / 4] = (uint32_t)FW_FW_BASE;
+	bhi[0x10 / 4] = FW_SBL;
+	bhi[0x18 / 4] = 1;
+	printf("FUXI MHI: bhi armed addr %#x size %#x\n", (uint32_t)FW_FW_BASE, FW_SBL);
+	for (i = 0; i < 3000; i++) {
+		status = bhi[0x2c / 4];
+		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
+			break;
+		delay(1000);
+	}
+	printf("FUXI MHI: bhi status %#x after %u ms errcode %#x dbg %#x/%#x/%#x\n",
+	    status, i, bhi[0x30 / 4], bhi[0x34 / 4], bhi[0x38 / 4], bhi[0x3c / 4]);
+	printf("FUXI MHI: execenv %#x numseg %#x state %#x\n", bhi[0x28 / 4],
+	    bhi[0x48 / 4], (m[0x48 / 4] >> 8) & 0xffu);
+	printf("FUXI MHI: stage 6 done\n");
 }
 
 static void
@@ -1792,6 +1900,7 @@ fw_mhi_probe(volatile uint32_t *patu, volatile uint32_t *pcfg, volatile uint32_t
 	pcfg[0x04 / 4] = command;
 	printf("FUXI MHI: bar0 mask %#x size %#x address %#x command %#x\n", mask, size,
 	    address, command);
+	bar0 = address;
 	base = ml_io_map(address, size);
 	if (base == 0) {
 		printf("FUXI MHI: bar map failed\n");
