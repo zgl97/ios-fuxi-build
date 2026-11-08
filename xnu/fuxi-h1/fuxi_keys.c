@@ -1170,6 +1170,12 @@ fuxi_keys_touch_wake(void)
 #define FW_CTL_ACTIVE	(1u << 16)
 #define FW_CTL_TRIGGER	(1u << 24)
 #define FW_DB_MAGIC	0x0c0330dbu
+#define FW_TLMM	0x0f100000ULL
+#define FW_TLMM_SZ	0x60000u
+#define FW_GCC_SZ	0x80000u
+#define FW_WLAN_EN	80u
+#define FW_CLKREQ	95u
+#define FW_PERST	94u
 
 struct fw_rail {
 	const char *name;
