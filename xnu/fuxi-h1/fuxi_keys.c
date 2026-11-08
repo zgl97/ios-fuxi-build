@@ -1814,6 +1814,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 
 	printf("FUXI MHI: stage 6 starting\n");
+	printf("FUXI MHI: stage 6 mapping fw window\n");
 	span = m[0x00 / 4];
 	if (span == 0 || span > 0x10000)
 		span = 0x10000;
@@ -1822,6 +1823,11 @@ fw_bhi_boot(volatile uint32_t *m)
 		printf("FUXI MHI: firmware window map failed\n");
 		return;
 	}
+	printf("FUXI MHI: stage 6 window %#lx first word %#x\n", (unsigned long)win,
+	    *(volatile uint32_t *)win);
+	printf("FUXI MHI: stage 6 waiting for vfs\n");
+	delay(12000000);
+	printf("FUXI MHI: stage 6 reading firmware\n");
 	size = fw_read_file(path, win, FW_FW_WIN);
 	if (size == 0) {
 		printf("FUXI MHI: no firmware\n");
