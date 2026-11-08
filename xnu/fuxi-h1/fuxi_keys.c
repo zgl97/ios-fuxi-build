@@ -1176,6 +1176,23 @@ fuxi_keys_touch_wake(void)
 #define FW_WLAN_EN	80u
 #define FW_CLKREQ	95u
 #define FW_PERST	94u
+#define FW_PHY		0x01c06000ULL
+#define FW_PHY_SZ	0x2000u
+#define FW_ATU		0x60001000ULL
+#define FW_CONFIG	0x60100000ULL
+#define FW_TCSR		0x1fd5000ULL
+#define FW_AUXRCG	0x6b074u
+#define FW_RCHNGRCG	0x6b058u
+#define FW_PIPEMUX	0x6b070u
+#define FW_PCIEBRC	0x6b000u
+#define FW_PHYBRC	0x6c01cu
+#define FW_COLLAPSE	0x52020u
+#define FW_PHYGDSC	0x6c000u
+#define FW_VOTE8B	0x7fu
+#define FW_VOTE0B	((1u << 12) | (1u << 19) | (1u << 22))
+#define FW_PARF_SZ	0x3000u
+#define FW_DBI		0x60000000ULL
+#define FW_DBI_SZ	0x1000u
 
 struct fw_rail {
 	const char *name;
@@ -1445,6 +1462,251 @@ fw_wifi_power(void)
 	printf("FUXI WIFI: stage 3 done\n");
 }
 
+struct fw_phyinit {
+	uint16_t	offset;
+	uint8_t		value;
+};
+
+static const struct fw_phyinit fw_serdes[] = {
+	{0x00c0, 0x01}, {0x00cc, 0x62}, {0x00d0, 0x02}, {0x0060, 0xf8},
+	{0x0064, 0x01}, {0x0000, 0x93}, {0x0004, 0x01}, {0x00e0, 0x90},
+	{0x00e4, 0x82}, {0x00f4, 0x07}, {0x0070, 0x02}, {0x0010, 0x02},
+	{0x0074, 0x16}, {0x0014, 0x16}, {0x0078, 0x36}, {0x0018, 0x36},
+	{0x0110, 0x08}, {0x00bc, 0x0a}, {0x0120, 0x42}, {0x0080, 0x04},
+	{0x0084, 0x0d}, {0x0020, 0x0a}, {0x0024, 0x1a}, {0x0088, 0x41},
+	{0x0028, 0x34}, {0x0090, 0xab}, {0x0094, 0xaa}, {0x0098, 0x01},
+	{0x0030, 0x55}, {0x0034, 0x55}, {0x0038, 0x01}, {0x0140, 0x14},
+	{0x0164, 0x34}, {0x003c, 0x01}, {0x001c, 0x04}, {0x0174, 0x16},
+	{0x01bc, 0x0f}, {0x0170, 0xa0}
+};
+
+static const struct fw_phyinit fw_tx[] = {
+	{0x0e84, 0x15}, {0x0e90, 0x3f}, {0x0ee4, 0x02}, {0x0e40, 0x06},
+	{0x0e3c, 0x18}
+};
+
+static const struct fw_phyinit fw_rx[] = {
+	{0x11a4, 0x38}, {0x10dc, 0x11}, {0x1160, 0xbf}, {0x1164, 0xbf},
+	{0x1168, 0xb7}, {0x116c, 0xea}, {0x115c, 0x3f}, {0x1174, 0x5c},
+	{0x1178, 0x9c}, {0x117c, 0x1a}, {0x1180, 0x89}, {0x1170, 0xdc},
+	{0x1188, 0x94}, {0x118c, 0x5b}, {0x1190, 0x1a}, {0x1194, 0x89},
+	{0x10cc, 0x00}, {0x1008, 0x09}, {0x1014, 0x05}, {0x104c, 0x08},
+	{0x1050, 0x08}, {0x10d8, 0x0f}, {0x1118, 0x1c}, {0x10f8, 0x07},
+	{0x11f8, 0x08}
+};
+
+static const struct fw_phyinit fw_pcs[] = {
+	{0x02dc, 0x05}, {0x0388, 0x77}, {0x0398, 0x0b}, {0x03e0, 0x0f},
+	{0x03d0, 0x8c}
+};
+
+static const struct fw_phyinit fw_pcsmisc[] = {
+	{0x06a4, 0x1e}, {0x06f4, 0x27}, {0x060c, 0x1d}, {0x0614, 0x07},
+	{0x0620, 0xc1}, {0x0694, 0x00}
+};
+
+static void
+fw_wait_clear(volatile uint32_t *reg, uint32_t mask, unsigned tries)
+{
+	unsigned i;
+
+	for (i = 0; i < tries && (*reg & mask); i++)
+		delay(100);
+}
+
+static void
+fw_pulse_reset(volatile uint32_t *g, uint32_t bcr)
+{
+	g[bcr / 4] |= 1u;
+	delay(1000);
+	g[bcr / 4] &= ~1u;
+	delay(1000);
+}
+
+/* WiFi stage 4: the PCIe0 clocks, the controller's PARF set-up, the QMP PHY tables, then PERST#
+ * release and the LTSSM. Ends with a configuration read of the endpoint, which is still in reset
+ * if the link never came up. */
+static void
+fw_pcie_up(void)
+{
+	vm_offset_t base;
+	volatile uint32_t *g, *t, *f, *d, *p, *a, *c;
+	uint32_t off, tries, power, ms;
+	unsigned i;
+
+	base = ml_io_map(FW_GCC, FW_GCC_SZ);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 gcc map failed\n");
+		return;
+	}
+	g = (volatile uint32_t *)base;
+	printf("FUXI WIFI: stage 4 clocks\n");
+	/* Sources first (an RCG takes its new configuration on CMD bit 0), the pipe mux parked on
+	 * TCXO until the PHY runs, then the branch votes. */
+	g[(FW_AUXRCG + 4) / 4] = 0;
+	g[FW_AUXRCG / 4] |= 1u;
+	g[(FW_RCHNGRCG + 4) / 4] = 6u << 8 | 5u;
+	g[FW_RCHNGRCG / 4] |= 1u;
+	fw_wait_clear(&g[FW_AUXRCG / 4], 1u, 100);
+	fw_wait_clear(&g[FW_RCHNGRCG / 4], 1u, 100);
+	g[FW_PIPEMUX / 4] = (g[FW_PIPEMUX / 4] & ~3u) | 2u;
+	g[FW_VOTE8 / 4] |= FW_VOTE8B;
+	g[FW_VOTE0 / 4] |= FW_VOTE0B;
+	base = ml_io_map(FW_TCSR, 0x1000);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 tcsr map failed\n");
+		return;
+	}
+	((volatile uint32_t *)base)[0x100 / 4] |= 1u;
+	printf("FUXI WIFI: stage 4 clk votes %#x %#x pipe mux %#x\n",
+	    g[FW_VOTE8 / 4], g[FW_VOTE0 / 4], g[FW_PIPEMUX / 4]);
+	delay(200);
+	off = 0;
+	for (i = 0; i < sizeof fw_branches / sizeof fw_branches[0]; i++)
+		if (g[fw_branches[i] / 4] & (1u << 31))
+			off |= 1u << i;
+	printf("FUXI WIFI: stage 4 branches off %#x\n", off);
+	fw_pulse_reset(g, FW_PCIEBRC);
+	fw_pulse_reset(g, FW_PHYBRC);
+
+	base = ml_io_map(FW_PARF, FW_PARF_SZ);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 parf map failed\n");
+		return;
+	}
+	f = (volatile uint32_t *)base;
+	printf("FUXI WIFI: stage 4 parf\n");
+	f[0x1000 / 4] = 4u;
+	f[0x40 / 4] &= ~1u;
+	f[0x350 / 4] = (uint32_t)FW_DBI;
+	f[0x354 / 4] = (uint32_t)(FW_DBI >> 32);
+	f[0x634 / 4] = (uint32_t)FW_ATU;
+	f[0x638 / 4] = (uint32_t)(FW_ATU >> 32);
+	f[0x358 / 4] = 0;
+	f[0x35c / 4] = 0x80000000u;
+	f[0x0 / 4] &= ~(1u << 29);
+	f[0x174 / 4] |= 1u << 4;
+	f[0x20 / 4] &= ~(1u << 5);
+	f[0x1a8 / 4] |= 1u << 31;
+
+	base = ml_io_map(FW_PHY, FW_PHY_SZ);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 phy map failed\n");
+		return;
+	}
+	p = (volatile uint32_t *)base;
+	printf("FUXI WIFI: stage 4 phy tables\n");
+	p[0x240 / 4] |= 3u;
+	for (i = 0; i < sizeof fw_serdes / sizeof fw_serdes[0]; i++)
+		p[fw_serdes[i].offset / 4] = fw_serdes[i].value;
+	for (i = 0; i < sizeof fw_tx / sizeof fw_tx[0]; i++) {
+		p[fw_tx[i].offset / 4] = fw_tx[i].value;
+		p[(fw_tx[i].offset + 0x800) / 4] = fw_tx[i].value;
+	}
+	for (i = 0; i < sizeof fw_rx / sizeof fw_rx[0]; i++) {
+		p[fw_rx[i].offset / 4] = fw_rx[i].value;
+		p[(fw_rx[i].offset + 0x800) / 4] = fw_rx[i].value;
+	}
+	for (i = 0; i < sizeof fw_pcs / sizeof fw_pcs[0]; i++)
+		p[fw_pcs[i].offset / 4] = fw_pcs[i].value;
+	for (i = 0; i < sizeof fw_pcsmisc / sizeof fw_pcsmisc[0]; i++)
+		p[fw_pcsmisc[i].offset / 4] = fw_pcsmisc[i].value;
+	g[FW_PIPEMUX / 4] &= ~3u;
+	p[0x200 / 4] &= ~1u;
+	p[0x244 / 4] |= 3u;
+	delay(1000);
+	for (tries = 0; tries < 100 && (p[0x214 / 4] & (1u << 6)); tries++)
+		delay(100);
+	printf("FUXI WIFI: stage 4 phy status1 %#x tries %u\n", p[0x214 / 4], tries);
+
+	/* The controller tells the SMMU which stream a requester's DMA belongs to from a hash table of
+	 * requester IDs; the iommu-map sends requester 0x100 to stream 0x1401. */
+	for (i = 0; i < 256; i++)
+		f[(0x2000 + 4 * i) / 4] = 0;
+	f[0x2c00 / 4] &= ~1u;
+	{
+		uint8_t crc = 0;
+		uint16_t bdf = 0x100;
+		uint8_t bytes[2];
+		int bit;
+		bytes[0] = (uint8_t)(bdf >> 8);
+		bytes[1] = (uint8_t)bdf;
+		for (i = 0; i < 2; i++) {
+			uint8_t byte = bytes[i];
+			crc ^= byte;
+			for (bit = 0; bit < 8; bit++)
+				crc = (crc & 0x80) ? (uint8_t)((crc << 1) ^ 7) :
+				    (uint8_t)(crc << 1);
+		}
+		f[(0x2000 + 4 * crc) / 4] = 0x100u << 16 | 1u << 8;
+		printf("FUXI WIFI: stage 4 sid hash %#x entry %#x\n", crc,
+		    f[(0x2000 + 4 * crc) / 4]);
+	}
+
+	base = ml_io_map(FW_DBI, FW_DBI_SZ);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 dbi map failed\n");
+		return;
+	}
+	d = (volatile uint32_t *)base;
+	d[0x18 / 4] = 0x00010100;
+	d[0x4 / 4] |= 0x6u;
+
+	base = ml_io_map(FW_TLMM, FW_TLMM_SZ);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 tlmm map failed\n");
+		return;
+	}
+	t = (volatile uint32_t *)base;
+	printf("FUXI WIFI: stage 4 release perst\n");
+	delay(100000);
+	fw_tlmm_pin(t, FW_PERST, 1u | 1u << 9, 1);
+	delay(1000);
+	f[FW_PARF_LTSSM / 4] |= 1u << 8;
+	printf("FUXI WIFI: stage 4 ltssm enabled, polling\n");
+	ms = 0;
+	while (ms < 1000) {
+		if ((d[0x72c / 4] & (1u << 4)) && (d[0x728 / 4] & 0x3fu) == 0x11)
+			break;
+		delay(1000);
+		ms++;
+	}
+	printf("FUXI WIFI: stage 4 link %u ms debug0 %#x debug1 %#x\n",
+	    ms, d[0x728 / 4], d[0x72c / 4]);
+	printf("FUXI WIFI: stage 4 dbi id %#x linkctl %#x ltssm %#x\n",
+	    d[0], d[0x80 / 4], f[FW_PARF_LTSSM / 4]);
+
+	if (ms >= 1000) {
+		printf("FUXI WIFI: stage 4 no link\n");
+		return;
+	}
+
+	base = ml_io_map(FW_ATU, 0x1000);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 atu map failed\n");
+		return;
+	}
+	a = (volatile uint32_t *)base;
+	a[0x08 / 4] = (uint32_t)FW_CONFIG;
+	a[0x0c / 4] = (uint32_t)(FW_CONFIG >> 32);
+	a[0x10 / 4] = (uint32_t)(FW_CONFIG + 0xfffff);
+	a[0x20 / 4] = (uint32_t)((FW_CONFIG + 0xfffff) >> 32);
+	a[0x14 / 4] = 1u << 24;
+	a[0x18 / 4] = 0;
+	a[0x0 / 4] = 0x4;
+	a[0x04 / 4] = 1u << 31;
+	for (i = 0; i < 5 && !(a[0x04 / 4] & (1u << 31)); i++)
+		delay(10);
+	base = ml_io_map(FW_CONFIG, 0x1000);
+	if (base == 0) {
+		printf("FUXI WIFI: stage 4 config map failed\n");
+		return;
+	}
+	c = (volatile uint32_t *)base;
+	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
+	printf("FUXI WIFI: stage 4 done\n");
+}
+
 static void
 fk_wifi_thread(void *arg, wait_result_t wr)
 {
@@ -1463,6 +1725,10 @@ fk_wifi_thread(void *arg, wait_result_t wr)
 	if (stage >= 3) {
 		printf("FUXI WIFI: powering pins and GDSCs\n");
 		fw_wifi_power();
+	}
+	if (stage >= 4) {
+		printf("FUXI WIFI: stage 4 starting\n");
+		fw_pcie_up();
 	}
 	printf("FUXI WIFI: probe done\n");
 }
