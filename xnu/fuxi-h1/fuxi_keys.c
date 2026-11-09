@@ -1222,6 +1222,7 @@ struct fw_rsc_layout {
 
 static uint32_t fw_stage;
 static vm_offset_t fw_smmu_win;
+extern uint64_t kvtophys(vm_offset_t va);
 static uint32_t fw_bhi_addr;
 static vm_offset_t bar0;
 static void fw_atu_dump(volatile uint32_t *);
@@ -1906,8 +1907,6 @@ fw_mhi_regs(volatile uint32_t *m, uint32_t span)
 		printf("FUXI MHI: level %u\n", level5);
 }
 
-#ifndef kvtophys
-extern uint64_t kvtophys(vm_offset_t va);
 #endif
 
 #define FW_DMA_PCI	0x61000000u
