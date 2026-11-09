@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1246 @@
+@@ -289,5 +852,1304 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1148,7 +1148,7 @@
 +#define FW_VOTE0B	((1u << 12) | (1u << 19) | (1u << 22))
 +#define FW_MEMBASE	0x60300000u
 +#define FW_MEMSIZE	0x3d00000u
-+#define FW_MHI_SZ	0x200000u
++#define FW_MHI_SZ	0x200000u\n#define FW_IOVA	0x61000000u
 +#define FW_PARF_SZ	0x3000u
 +#define FW_DBI		0x60000000ULL
 +#define FW_DBI_SZ	0x1000u
@@ -1170,6 +1170,8 @@
 +};
 +
 +static uint32_t fw_stage;
++static vm_offset_t fw_smmu_win;
++static uint32_t fw_bhi_addr;
 +static vm_offset_t bar0;
 +static void fw_atu_dump(volatile uint32_t *);
 +static void fw_smmu_dump(void);
@@ -1531,6 +1533,57 @@
 +		printf("FUXI SMMU: smr%u %#x s2cr%u %#x\n", i, m[(0x800 + i * 4) / 4], i,
 +		    m[(0xc00 + i * 4) / 4]);
 +	printf("FUXI SMMU: scan\n");
++	if (fw_stage >= 11) {
++		vm_offset_t dma2, l1, l2;
++		kr = kmem_alloc_contig(kernel_map, &dma2, FW_FW_WIN, 0x1fffffu, 0x100000u, 0,
++		    KMA_ZERO, VM_KERN_MEMORY_BSD);
++		printf("FUXI SMMU: dma2 %d %#lx\n", kr, (unsigned long)dma2);
++		if (kr == KERN_SUCCESS && dma2) {
++			uint64_t *t1, *t2, dpa, p1, p2;
++			kr = kmem_alloc_contig(kernel_map, &l1, 0x1000, 0xfffu, 1, 0, KMA_ZERO,
++			    VM_KERN_MEMORY_BSD);
++			kr |= kmem_alloc_contig(kernel_map, &l2, 0x1000, 0xfffu, 1, 0, KMA_ZERO,
++			    VM_KERN_MEMORY_BSD);
++			printf("FUXI SMMU: tables %d l1 %#lx l2 %#lx\n", kr,
++			    (unsigned long)l1, (unsigned long)l2);
++			if (kr == KERN_SUCCESS && l1 && l2) {
++				dpa = kvtophys(dma2);
++				p1 = kvtophys(l1);
++				p2 = kvtophys(l2);
++				t1 = (uint64_t *)l1;
++				t2 = (uint64_t *)l2;
++				t1[(FW_IOVA >> 30) & 3u] = p2 | 3u;
++				for (i = 0; i < 4; i++)
++					t2[((FW_IOVA >> 21) & 0x1ffu) + i] = (dpa + (uint64_t)i * 0x200000u) | 0x441u;
++				__asm__ volatile("dsb sy" ::: "memory");
++				printf("FUXI SMMU: l1[%u] %#llx l2[%u] %#llx dpa %#llx\n",
++				    (FW_IOVA >> 30) & 3u, (unsigned long long)t1[(FW_IOVA >> 30) & 3u],
++				    (FW_IOVA >> 21) & 0x1ffu,
++				    (unsigned long long)t2[(FW_IOVA >> 21) & 0x1ffu],
++				    (unsigned long long)dpa);
++				m[0x2000 / 4] = 0;
++				m[0x2020 / 4] = (uint32_t)p1;
++				m[0x2024 / 4] = (uint32_t)(p1 >> 32);
++				m[0x2030 / 4] = 16u;
++				m[0x2008 / 4] = 0;
++				m[0x200c / 4] = 0;
++				__asm__ volatile("dsb sy" ::: "memory");
++				m[0x2000 / 4] = 0x31u;
++				__asm__ volatile("dsb sy" ::: "memory");
++				m[0x820 / 4] = 0x80000000u | 0x1400u;
++				m[0x824 / 4] = 0x80000000u | 0x1401u;
++				m[0xc20 / 4] = 0x2u << 16;
++				m[0xc24 / 4] = 0x2u << 16;
++				__asm__ volatile("dsb sy" ::: "memory");
++				printf("FUXI SMMU: smr8 %#x smr9 %#x s2cr8 %#x s2cr9 %#x sctlr %#x\n",
++				    m[0x820 / 4], m[0x824 / 4], m[0xc20 / 4], m[0xc24 / 4],
++				    m[0x2000 / 4]);
++				fw_smmu_win = dma2;
++				fw_bhi_addr = FW_IOVA;
++				fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
++			}
++		}
++	}
 +	if (fw_stage >= 10) {
 +		unsigned i;
 +		printf("FUXI GR0: sweep\n");
@@ -1866,7 +1919,11 @@
 +
 +	printf("FUXI MHI: stage 6 starting\n");
 +	span = FW_MHI_SZ;   /* mapping size, not MHI_REGLEN (0x100) */
-+	printf("FUXI MHI: stage 6 allocating dma buffer\n");
++	if (fw_smmu_win) {
++		win = fw_smmu_win;
++		printf("FUXI MHI: smmu window %#lx iova %#x\n", (unsigned long)win, fw_bhi_addr);
++	} else {
++		printf("FUXI MHI: stage 6 allocating dma buffer\n");
 +	/* the endpoint has a 32-bit DMA mask: prefer memory below 4 GiB (0x100000 pages) */
 +	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0x100000u, 0,
 +	    KMA_ZERO, VM_KERN_MEMORY_BSD);
@@ -1879,6 +1936,7 @@
 +	if (kr != KERN_SUCCESS || win == 0) {
 +		printf("FUXI MHI: dma alloc failed %d\n", kr);
 +		return;
++	}
 +	}
 +	printf("FUXI MHI: dma low %u\n", low_dma ? 1u : 0u);
 +	printf("FUXI MHI: dma buffer kva %#lx\n", (unsigned long)win);
@@ -1908,7 +1966,7 @@
 +	delay(20000);
 +	pa = kvtophys(win);
 +	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
-+	if (fw_atu_ptr && fw_dbi_ptr) {
++	if (fw_atu_ptr && fw_dbi_ptr && !fw_smmu_win) {
 +		volatile uint32_t *r1 = fw_atu_ptr + 0x200 / 4;
 +		uint32_t len = (size + 0xfffu) & ~0xfffu;
 +		if (len > FW_FW_WIN)
@@ -1928,12 +1986,12 @@
 +		printf("FUXI MHI: root memory base/limit %#x\n", fw_dbi_ptr[0x20 / 4]);
 +	}
 +	bhi[0x0c / 4] = 0;
-+	bhi[0x08 / 4] = FW_DMA_PCI;
++	bhi[0x08 / 4] = fw_smmu_win ? fw_bhi_addr : FW_DMA_PCI;
 +	bhi[0x10 / 4] = FW_SBL;
 +	printf("FUXI MHI: writing doorbell\n");
 +	delay(20000);
 +	bhi[0x18 / 4] = 1;
-+	printf("FUXI MHI: bhi armed addr %#x size %#x\n", FW_DMA_PCI, FW_SBL);
++	printf("FUXI MHI: bhi armed addr %#x size %#x\n", bhi[0x08 / 4], FW_SBL);
 +	for (i = 0; i < 3000; i++) {
 +		status = bhi[0x2c / 4];
 +		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
