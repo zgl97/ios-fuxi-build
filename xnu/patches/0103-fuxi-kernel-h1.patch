@@ -1710,8 +1710,8 @@
 +		printf("FUXI MHI: level %u\n", level5);
 +}
 +
-+#ifndef pmap_extract
-+extern vm_offset_t pmap_extract(pmap_t pmap, vm_offset_t va);
++#ifndef kvtophys
++extern uint64_t kvtophys(vm_offset_t va);
 +#endif
 +
 +#define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
@@ -1803,7 +1803,7 @@
 +	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
 +	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
 +	bhi[0x2c / 4] = 0;
-+	pa = (uint64_t)pmap_extract(kernel_pmap, win);
++	pa = kvtophys(win);
 +	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
 +	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
 +	bhi[0x08 / 4] = (uint32_t)pa;
