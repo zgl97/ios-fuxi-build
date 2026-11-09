@@ -1590,6 +1590,12 @@ fw_smmu_dump(void)
 		kern_return_t kr;
 		kr = kmem_alloc_contig(kernel_map, &dma2, 0x800000u, 0x1fffffu, 0x100000u, 0,
 		    KMA_ZERO, VM_KERN_MEMORY_BSD);
+		if (kr != KERN_SUCCESS || dma2 == 0) {
+			kr = kmem_alloc_contig(kernel_map, &dma2, 0x800000u, 0x1fffffu, 0, 0,
+			    KMA_ZERO, VM_KERN_MEMORY_BSD);
+			printf("FUXI SMMU: dma2 retry without the 4 GiB limit %d
+", kr);
+		}
 		printf("FUXI SMMU: dma2 %d %#lx\n", kr, (unsigned long)dma2);
 		if (kr == KERN_SUCCESS && dma2) {
 			uint64_t *t1, *t2, dpa, p1, p2;
