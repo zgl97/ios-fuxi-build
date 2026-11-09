@@ -1907,8 +1907,6 @@ fw_mhi_regs(volatile uint32_t *m, uint32_t span)
 		printf("FUXI MHI: level %u\n", level5);
 }
 
-#endif
-
 #define FW_DMA_PCI	0x61000000u
 #define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
 #define FW_FW_WIN	0x800000u
