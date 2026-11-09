@@ -41,6 +41,8 @@
 #include <kern/sched_prim.h>
 #include <machine/machine_routines.h>
 #include <pexpert/pexpert.h>
+#include <vm/vm_kern.h>
+#include <vm/pmap.h>
 #include <sys/vnode.h>
 #include <sys/namei.h>
 #include <sys/uio.h>
@@ -1809,22 +1811,24 @@ static void
 fw_bhi_boot(volatile uint32_t *m)
 {
 	volatile uint32_t *bhi;
-	vm_offset_t win;
+	vm_offset_t win = 0;
+	kern_return_t kr;
+	uint64_t pa = 0;
 	uint32_t span, bhioff, size, status = 0, i;
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 
 	printf("FUXI MHI: stage 6 starting\n");
-	printf("FUXI MHI: stage 6 mapping fw window\n");
 	span = m[0x00 / 4];
 	if (span == 0 || span > 0x10000)
 		span = 0x10000;
-	win = ml_io_map((vm_offset_t)FW_FW_BASE, FW_FW_WIN);
-	if (win == 0) {
-		printf("FUXI MHI: firmware window map failed\n");
+	printf("FUXI MHI: stage 6 allocating dma buffer\n");
+	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0, 0,
+	    KMA_ZERO, VM_KERN_MEMORY_BSD);
+	if (kr != KERN_SUCCESS || win == 0) {
+		printf("FUXI MHI: dma alloc failed %d\n", kr);
 		return;
 	}
-	printf("FUXI MHI: stage 6 window %#lx first word %#x\n", (unsigned long)win,
-	    *(volatile uint32_t *)win);
+	printf("FUXI MHI: dma buffer kva %#lx\n", (unsigned long)win);
 	printf("FUXI MHI: stage 6 waiting for vfs\n");
 	delay(12000000);
 	printf("FUXI MHI: stage 6 reading firmware\n");
@@ -1833,8 +1837,8 @@ fw_bhi_boot(volatile uint32_t *m)
 		printf("FUXI MHI: no firmware\n");
 		return;
 	}
-	printf("FUXI MHI: fw at %#llx size %u first words %#x %#x %#x %#x\n",
-	    (unsigned long long)FW_FW_BASE, size,
+	printf("FUXI MHI: fw at %#lx size %u first words %#x %#x %#x %#x\n",
+	    (unsigned long)win, size,
 	    ((volatile uint32_t *)win)[0], ((volatile uint32_t *)win)[1],
 	    ((volatile uint32_t *)win)[2], ((volatile uint32_t *)win)[3]);
 	bhioff = m[0x28 / 4];
@@ -1845,11 +1849,13 @@ fw_bhi_boot(volatile uint32_t *m)
 	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
 	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
 	bhi[0x2c / 4] = 0;
-	bhi[0x0c / 4] = 0;
-	bhi[0x08 / 4] = (uint32_t)FW_FW_BASE;
+	pa = (uint64_t)pmap_extract(kernel_pmap, win);
+	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
+	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
+	bhi[0x08 / 4] = (uint32_t)pa;
 	bhi[0x10 / 4] = FW_SBL;
 	bhi[0x18 / 4] = 1;
-	printf("FUXI MHI: bhi armed addr %#x size %#x\n", (uint32_t)FW_FW_BASE, FW_SBL);
+	printf("FUXI MHI: bhi armed addr %#llx size %#x\n", (unsigned long long)pa, FW_SBL);
 	for (i = 0; i < 3000; i++) {
 		status = bhi[0x2c / 4];
 		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
