@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1304 @@
+@@ -289,5 +852,1306 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1148,7 +1148,8 @@
 +#define FW_VOTE0B	((1u << 12) | (1u << 19) | (1u << 22))
 +#define FW_MEMBASE	0x60300000u
 +#define FW_MEMSIZE	0x3d00000u
-+#define FW_MHI_SZ	0x200000u\n#define FW_IOVA	0x61000000u
++#define FW_MHI_SZ	0x200000u
++#define FW_IOVA	0x61000000u
 +#define FW_PARF_SZ	0x3000u
 +#define FW_DBI		0x60000000ULL
 +#define FW_DBI_SZ	0x1000u
@@ -1535,7 +1536,8 @@
 +	printf("FUXI SMMU: scan\n");
 +	if (fw_stage >= 11) {
 +		vm_offset_t dma2, l1, l2;
-+		kr = kmem_alloc_contig(kernel_map, &dma2, FW_FW_WIN, 0x1fffffu, 0x100000u, 0,
++		kern_return_t kr;
++		kr = kmem_alloc_contig(kernel_map, &dma2, 0x800000u, 0x1fffffu, 0x100000u, 0,
 +		    KMA_ZERO, VM_KERN_MEMORY_BSD);
 +		printf("FUXI SMMU: dma2 %d %#lx\n", kr, (unsigned long)dma2);
 +		if (kr == KERN_SUCCESS && dma2) {
