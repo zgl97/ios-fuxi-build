@@ -1674,7 +1674,7 @@
 +	if (fw_stage >= 5) {
 +		fw_mhi_probe(a, c, d);
 +		if (fw_stage >= 6)
-+			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
++			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ), FW_MHI_SZ);
 +	} else {
 +		printf("FUXI WIFI: stage 4 done\n");
 +	}
