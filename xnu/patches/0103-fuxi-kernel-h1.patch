@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1151 @@
+@@ -289,5 +852,1160 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1774,18 +1774,27 @@
 +	vm_offset_t win = 0;
 +	kern_return_t kr;
 +	uint64_t pa = 0;
++	unsigned low_dma = 0;
 +	uint32_t span, bhioff, size, status = 0, i;
 +	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 +
 +	printf("FUXI MHI: stage 6 starting\n");
 +	span = FW_MHI_SZ;   /* mapping size, not MHI_REGLEN (0x100) */
 +	printf("FUXI MHI: stage 6 allocating dma buffer\n");
-+	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0, 0,
++	/* the endpoint has a 32-bit DMA mask: prefer memory below 4 GiB (0x100000 pages) */
++	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0x100000u, 0,
 +	    KMA_ZERO, VM_KERN_MEMORY_BSD);
++	low_dma = (kr == KERN_SUCCESS && win != 0);
++	if (!low_dma) {
++		printf("FUXI MHI: no memory below 4 GiB (%d), falling back\n", kr);
++		kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0, 0,
++		    KMA_ZERO, VM_KERN_MEMORY_BSD);
++	}
 +	if (kr != KERN_SUCCESS || win == 0) {
 +		printf("FUXI MHI: dma alloc failed %d\n", kr);
 +		return;
 +	}
++	printf("FUXI MHI: dma low %u\n", low_dma ? 1u : 0u);
 +	printf("FUXI MHI: dma buffer kva %#lx\n", (unsigned long)win);
 +	printf("FUXI MHI: stage 6 waiting for vfs\n");
 +	delay(2000000);
