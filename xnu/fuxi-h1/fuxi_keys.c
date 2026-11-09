@@ -1852,8 +1852,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	}
 	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
 	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
-	printf("FUXI MHI: writing bhi status
-");
+	printf("FUXI MHI: writing bhi status\n");
 	bhi[0x2c / 4] = 0;
 	delay(20000);
 	pa = kvtophys(win);
@@ -1861,8 +1860,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
 	bhi[0x08 / 4] = (uint32_t)pa;
 	bhi[0x10 / 4] = FW_SBL;
-	printf("FUXI MHI: writing doorbell
-");
+	printf("FUXI MHI: writing doorbell\n");
 	delay(20000);
 	bhi[0x18 / 4] = 1;
 	printf("FUXI MHI: bhi armed addr %#llx size %#x\n", (unsigned long long)pa, FW_SBL);
