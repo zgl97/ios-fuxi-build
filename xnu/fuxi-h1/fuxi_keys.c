@@ -1221,6 +1221,8 @@ struct fw_rsc_layout {
 
 static uint32_t fw_stage;
 static vm_offset_t bar0;
+static volatile uint32_t *fw_atu_ptr;
+static volatile uint32_t *fw_dbi_ptr;
 static void fw_bhi_boot(volatile uint32_t *);
 static uint32_t fw_read_file(const char *, vm_offset_t, uint32_t);
 
@@ -1723,8 +1725,11 @@ fw_pcie_up(void)
 	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
-		if (fw_stage >= 6)
+		if (fw_stage >= 6) {
+			fw_atu_ptr = a;
+			fw_dbi_ptr = d;
 			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
+		}
 	} else {
 		printf("FUXI WIFI: stage 4 done\n");
 	}
@@ -1764,6 +1769,7 @@ fw_mhi_regs(volatile uint32_t *m, uint32_t span)
 extern uint64_t kvtophys(vm_offset_t va);
 #endif
 
+#define FW_DMA_PCI	0x61000000u
 #define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
 #define FW_FW_WIN	0x800000u
 #define FW_SBL		0x80000u	/* ath12k: sbl_size = SZ_512K */
@@ -1857,13 +1863,32 @@ fw_bhi_boot(volatile uint32_t *m)
 	delay(20000);
 	pa = kvtophys(win);
 	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
-	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
-	bhi[0x08 / 4] = (uint32_t)pa;
+	if (fw_atu_ptr && fw_dbi_ptr) {
+		volatile uint32_t *r1 = fw_atu_ptr + 0x200 / 4;
+		uint32_t len = (size + 0xfffu) & ~0xfffu;
+		if (len > FW_FW_WIN)
+			len = FW_FW_WIN;
+		r1[0x08 / 4] = FW_DMA_PCI;
+		r1[0x0c / 4] = 0;
+		r1[0x10 / 4] = FW_DMA_PCI + len - 1;
+		r1[0x20 / 4] = 0;
+		r1[0x14 / 4] = (uint32_t)pa;
+		r1[0x18 / 4] = (uint32_t)(pa >> 32);
+		r1[0x00 / 4] = 0x0;
+		r1[0x04 / 4] = 1u << 31;
+		printf("FUXI MHI: dma window pci %#x target %#llx len %#x ctrl %#x\n",
+		    FW_DMA_PCI, (unsigned long long)pa, len, r1[0x04 / 4]);
+		fw_dbi_ptr[0x20 / 4] = ((FW_DMA_PCI + len - 1) & 0xfff00000u) |
+		    ((0x60000000u >> 16) & 0xfff0u);
+		printf("FUXI MHI: root memory base/limit %#x\n", fw_dbi_ptr[0x20 / 4]);
+	}
+	bhi[0x0c / 4] = 0;
+	bhi[0x08 / 4] = FW_DMA_PCI;
 	bhi[0x10 / 4] = FW_SBL;
 	printf("FUXI MHI: writing doorbell\n");
 	delay(20000);
 	bhi[0x18 / 4] = 1;
-	printf("FUXI MHI: bhi armed addr %#llx size %#x\n", (unsigned long long)pa, FW_SBL);
+	printf("FUXI MHI: bhi armed addr %#x size %#x\n", FW_DMA_PCI, FW_SBL);
 	for (i = 0; i < 3000; i++) {
 		status = bhi[0x2c / 4];
 		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
