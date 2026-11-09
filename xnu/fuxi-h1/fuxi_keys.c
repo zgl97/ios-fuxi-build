@@ -1724,7 +1724,7 @@ fw_pcie_up(void)
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
 		if (fw_stage >= 6)
-			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ), FW_MHI_SZ);
+			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
 	} else {
 		printf("FUXI WIFI: stage 4 done\n");
 	}
@@ -1822,9 +1822,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 
 	printf("FUXI MHI: stage 6 starting\n");
-	span = m[0x00 / 4];
-	if (span == 0 || span > 0x10000)
-		span = 0x10000;
+	span = FW_MHI_SZ;   /* mapping size, not MHI_REGLEN (0x100) */
 	printf("FUXI MHI: stage 6 allocating dma buffer\n");
 	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0, 0,
 	    KMA_ZERO, VM_KERN_MEMORY_BSD);
