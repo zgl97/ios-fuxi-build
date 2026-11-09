@@ -1221,6 +1221,7 @@ struct fw_rsc_layout {
 
 static uint32_t fw_stage;
 static vm_offset_t bar0;
+static void fw_atu_dump(volatile uint32_t *);
 static volatile uint32_t *fw_atu_ptr;
 static volatile uint32_t *fw_dbi_ptr;
 static void fw_bhi_boot(volatile uint32_t *);
@@ -1545,6 +1546,18 @@ fw_pulse_reset(volatile uint32_t *g, uint32_t bcr)
 /* WiFi stage 4: the PCIe0 clocks, the controller's PARF set-up, the QMP PHY tables, then PERST#
  * release and the LTSSM. Ends with a configuration read of the endpoint, which is still in reset
  * if the link never came up. */
+/* Dump the iATU window table so we can see which inbound/outbound regions the bootloader left. */
+static void
+fw_atu_dump(volatile uint32_t *a)
+{
+	unsigned r;
+	for (r = 0; r < 16; r++) {
+		volatile uint32_t *b = a + (r * 0x200) / 4;
+		printf("FUXI ATU: r%u ctrl %#x %#x base %#x:%#x limit %#x:%#x tgt %#x:%#x\n",
+		    r, b[0], b[1], b[3], b[2], b[8], b[4], b[6], b[5]);
+	}
+}
+
 static void
 fw_pcie_up(void)
 {
@@ -1700,7 +1713,7 @@ fw_pcie_up(void)
 		return;
 	}
 
-	base = ml_io_map(FW_ATU, 0x1000);
+	base = ml_io_map(FW_ATU, 0x4000);
 	if (base == 0) {
 		printf("FUXI WIFI: stage 4 atu map failed\n");
 		return;
@@ -1725,7 +1738,9 @@ fw_pcie_up(void)
 	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
-		if (fw_stage >= 6) {
+		if (fw_stage >= 7) {
+			fw_atu_dump(a);
+		} else if (fw_stage >= 6) {
 			fw_atu_ptr = a;
 			fw_dbi_ptr = d;
 			fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
