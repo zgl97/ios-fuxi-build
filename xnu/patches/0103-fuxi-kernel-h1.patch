@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1120 @@
+@@ -289,5 +852,1129 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1782,7 +1782,10 @@
 +	}
 +	printf("FUXI MHI: dma buffer kva %#lx\n", (unsigned long)win);
 +	printf("FUXI MHI: stage 6 waiting for vfs\n");
-+	delay(12000000);
++	delay(2000000);
++	printf("FUXI MHI: vfs wait done
++");
++	delay(2000000);
 +	printf("FUXI MHI: stage 6 reading firmware\n");
 +	size = fw_read_file(path, win, FW_FW_WIN);
 +	if (size == 0) {
@@ -1800,12 +1803,18 @@
 +	}
 +	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
 +	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
++	printf("FUXI MHI: writing bhi status
++");
 +	bhi[0x2c / 4] = 0;
++	delay(20000);
 +	pa = kvtophys(win);
 +	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
 +	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
 +	bhi[0x08 / 4] = (uint32_t)pa;
 +	bhi[0x10 / 4] = FW_SBL;
++	printf("FUXI MHI: writing doorbell
++");
++	delay(20000);
 +	bhi[0x18 / 4] = 1;
 +	printf("FUXI MHI: bhi armed addr %#llx size %#x\n", (unsigned long long)pa, FW_SBL);
 +	for (i = 0; i < 3000; i++) {
