@@ -1222,6 +1222,7 @@ struct fw_rsc_layout {
 static uint32_t fw_stage;
 static vm_offset_t bar0;
 static void fw_atu_dump(volatile uint32_t *);
+static void fw_smmu_dump(void);
 static volatile uint32_t *fw_atu_ptr;
 static volatile uint32_t *fw_dbi_ptr;
 static void fw_bhi_boot(volatile uint32_t *);
@@ -1559,6 +1560,30 @@ fw_atu_dump(volatile uint32_t *a)
 	}
 }
 
+/* Dump the apps SMMU so we can see whether the WLAN stream IDs bypass translation. */
+#define FW_SMMU		0x15000000u
+static void
+fw_smmu_dump(void)
+{
+	vm_offset_t base;
+	volatile uint32_t *m;
+	unsigned i;
+
+	base = ml_io_map(FW_SMMU, 0x1000);
+	if (base == 0) {
+		printf("FUXI SMMU: map failed\n");
+		return;
+	}
+	m = (volatile uint32_t *)base;
+	printf("FUXI SMMU: idr0 %#x idr1 %#x idr2 %#x scr0 %#x ack %#x gbpa %#x\n",
+	    m[0x00 / 4], m[0x04 / 4], m[0x08 / 4], m[0x00 / 4], m[0x20 / 4], m[0x28 / 4]);
+	for (i = 0; i < 8; i++)
+		printf("FUXI SMMU: smr%u %#x s2cr%u %#x\n", i, m[(0x800 + i * 4) / 4], i,
+		    m[(0xc00 + i * 4) / 4]);
+	printf("FUXI SMMU: qsmr0 %#x qs2cr0 %#x qs2cr8 %#x\n", m[0x60000 / 4],
+	    m[0x64000 / 4], m[0x64020 / 4]);
+}
+
 static void
 fw_pcie_up(void)
 {
@@ -1739,7 +1764,9 @@ fw_pcie_up(void)
 	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
-		if (fw_stage >= 7) {
+		if (fw_stage >= 8) {
+			fw_smmu_dump();
+		} else if (fw_stage >= 7) {
 			fw_atu_dump(a);
 		} else if (fw_stage >= 6) {
 			fw_atu_ptr = a;
