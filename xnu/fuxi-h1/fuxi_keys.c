@@ -1581,6 +1581,21 @@ fw_smmu_dump(void)
 		printf("FUXI SMMU: smr%u %#x s2cr%u %#x\n", i, m[(0x800 + i * 4) / 4], i,
 		    m[(0xc00 + i * 4) / 4]);
 	printf("FUXI SMMU: scan\n");
+	if (fw_stage >= 9) {
+		vm_offset_t low;
+		printf("FUXI SMR8: before read\n");
+		delay(200000);
+		printf("FUXI SMR8: %#x\n", m[0x820 / 4]);
+		printf("FUXI CB0: before read\n");
+		delay(200000);
+		printf("FUXI CB0: sctlr %#x ttbr0 %#x/%#x tcr %#x\n", m[0x1000 / 4],
+		    m[0x1020 / 4], m[0x1024 / 4], m[0x1030 / 4]);
+		printf("FUXI LOW: mapping 0x60300000\n");
+		low = ml_io_map(0x60300000, 0x1000);
+		printf("FUXI LOW: kva %#lx word %#x\n", (unsigned long)low,
+		    low ? *(volatile uint32_t *)low : 0xffffffffu);
+	}
+
 	for (i = 0; i < 128; i++) {
 		uint32_t smr = m[(0x800 + i * 4) / 4];
 		if ((smr & 0x80000000u) == 0)
