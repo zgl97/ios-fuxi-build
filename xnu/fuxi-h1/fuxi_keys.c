@@ -1580,8 +1580,6 @@ fw_smmu_dump(void)
 	for (i = 0; i < 8; i++)
 		printf("FUXI SMMU: smr%u %#x s2cr%u %#x\n", i, m[(0x800 + i * 4) / 4], i,
 		    m[(0xc00 + i * 4) / 4]);
-	printf("FUXI SMMU: qsmr0 %#x qs2cr0 %#x qs2cr8 %#x\n", m[0x60000 / 4],
-	    m[0x64000 / 4], m[0x64020 / 4]);
 	printf("FUXI SMMU: scan\n");
 	for (i = 0; i < 128; i++) {
 		uint32_t smr = m[(0x800 + i * 4) / 4];
