@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1305 @@
+@@ -289,5 +852,1303 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1856,8 +1856,6 @@
 +	if (PE_parse_boot_argn("fuximhi", &level5, sizeof level5))
 +		printf("FUXI MHI: level %u\n", level5);
 +}
-+
-+#endif
 +
 +#define FW_DMA_PCI	0x61000000u
 +#define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
