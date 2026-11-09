@@ -1581,6 +1581,22 @@ fw_smmu_dump(void)
 		printf("FUXI SMMU: smr%u %#x s2cr%u %#x\n", i, m[(0x800 + i * 4) / 4], i,
 		    m[(0xc00 + i * 4) / 4]);
 	printf("FUXI SMMU: scan\n");
+	if (fw_stage >= 10) {
+		unsigned i;
+		printf("FUXI GR0: sweep\n");
+		for (i = 0; i < 16; i++)
+			printf("FUXI GR0: %#x %#x\n", i * 4, m[i]);
+		for (i = 0; i < 8; i++)
+			printf("FUXI SMR: %#x %#x\n", 0x800 + i * 4, m[(0x800 + i * 4) / 4]);
+		for (i = 0; i < 8; i++)
+			printf("FUXI S2CR: %#x %#x\n", 0xc00 + i * 4, m[(0xc00 + i * 4) / 4]);
+		printf("FUXI CB: 0x2000..\n");
+		for (i = 0; i < 8; i++)
+			printf("FUXI CB0: %#x %#x\n", 0x2000 + i * 4, m[(0x2000 + i * 4) / 4]);
+		printf("FUXI CB: 0x2020..\n");
+		for (i = 0; i < 4; i++)
+			printf("FUXI CB0: %#x %#x\n", 0x2020 + i * 4, m[(0x2020 + i * 4) / 4]);
+	}
 	if (fw_stage >= 9) {
 		vm_offset_t low;
 		printf("FUXI SMR8: before read\n");
