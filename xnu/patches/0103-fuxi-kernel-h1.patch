@@ -65,7 +65,7 @@
  #endif /* ARM64_BOARD_CONFIG_SWEET */
 --- a/bsd/dev/fuxi_keys.c
 +++ b/bsd/dev/fuxi_keys.c
-@@ -14,21 +14,51 @@
+@@ -14,21 +14,53 @@
   * channels. With boot-arg fuxikeys_gpiocfg=1, and only if GPIO6 is not an
   * enabled input, the Linux pinctrl defaults for that one pin are written
   * through its RW channel (volatile PMIC GPIO config, nothing else).
@@ -96,6 +96,8 @@
  #include <kern/sched_prim.h>
  #include <machine/machine_routines.h>
  #include <pexpert/pexpert.h>
++#include <vm/vm_kern.h>
++#include <vm/pmap.h>
 +#include <sys/vnode.h>
 +#include <sys/namei.h>
 +#include <sys/uio.h>
@@ -118,7 +120,7 @@
  
  #define FK_CORE_PA     0x0c400000u
  #define FK_CNFG_PA     0x0c42d000u
-@@ -42,12 +72,52 @@
+@@ -42,12 +74,52 @@
  #define FK_PON_PWR     0x80u
  #define FK_PON_RESIN   0x40u
  #define FK_NO_APID     0xffffu
@@ -171,7 +173,7 @@
  
  static uint32_t
  fk_rd(vm_offset_t base, uint32_t off)
-@@ -79,9 +149,9 @@
+@@ -79,9 +151,9 @@
  }
  
  static bool
@@ -184,7 +186,7 @@
  		return false;
  	}
  	uint32_t off = 0x20u * apid;
-@@ -100,12 +170,22 @@
+@@ -100,12 +172,22 @@
  		}
  		delay(1);
  	}
@@ -208,7 +210,7 @@
  {
  	*(volatile uint32_t *)(chan + 0x10u) = val;           /* WDATA0 */
  	__asm__ volatile("dmb oshst" ::: "memory");
-@@ -122,6 +202,15 @@
+@@ -122,6 +204,15 @@
  }
  
  static bool
@@ -224,7 +226,7 @@
  fk_gpio_input(uint8_t subtype, uint8_t mode, uint8_t en)
  {
  	unsigned dir = subtype >= 0x10u && subtype <= 0x13u ?
-@@ -133,8 +222,9 @@
+@@ -133,8 +224,9 @@
  fk_gpio_dump(const char *when, uint8_t *subtype, uint8_t *mode, uint8_t *en)
  {
  	uint8_t type = 0, vin = 0, pull = 0, rt = 0;
@@ -235,7 +237,7 @@
  	    fk_read(fk_gpio_apid, 0x40, mode) &&
  	    fk_read(fk_gpio_apid, 0x41, &vin) &&
  	    fk_read(fk_gpio_apid, 0x42, &pull) &&
-@@ -154,6 +244,80 @@
+@@ -154,6 +246,80 @@
  	thread_block(THREAD_CONTINUE_NULL);
  }
  
@@ -316,7 +318,7 @@
  static bool
  fk_setup(void)
  {
-@@ -172,12 +336,13 @@
+@@ -172,12 +338,13 @@
  		    version, count);
  		return false;
  	}
@@ -332,7 +334,7 @@
  	    fk_read(fk_pon_apid, FK_PON_RT, &pon);
  	printf("FUXI KEYS: arb=%#x apids=%u pon-apid=%u/ee%u gpio6-apid=%u/ee%u pon ok=%d type=%#x subtype=%#x rt=%#x st=%#x\n",
  	    version, count, fk_pon_apid, pon_owner, fk_gpio_apid, gpio_owner,
-@@ -226,8 +391,7 @@
+@@ -226,8 +393,7 @@
  static void
  fk_thread(void *arg, wait_result_t result)
  {
@@ -342,7 +344,7 @@
  	unsigned errors = 0;
  	(void)arg;
  	(void)result;
-@@ -236,38 +400,435 @@
+@@ -236,38 +402,435 @@
  	}
  	for (;;) {
  		uint8_t pon = 0, gpio = 1;
@@ -796,7 +798,7 @@
  }
  
  void
-@@ -289,5 +850,1114 @@
+@@ -289,5 +852,1118 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1759,22 +1761,24 @@
 +fw_bhi_boot(volatile uint32_t *m)
 +{
 +	volatile uint32_t *bhi;
-+	vm_offset_t win;
++	vm_offset_t win = 0;
++	kern_return_t kr;
++	uint64_t pa = 0;
 +	uint32_t span, bhioff, size, status = 0, i;
 +	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 +
 +	printf("FUXI MHI: stage 6 starting\n");
-+	printf("FUXI MHI: stage 6 mapping fw window\n");
 +	span = m[0x00 / 4];
 +	if (span == 0 || span > 0x10000)
 +		span = 0x10000;
-+	win = ml_io_map((vm_offset_t)FW_FW_BASE, FW_FW_WIN);
-+	if (win == 0) {
-+		printf("FUXI MHI: firmware window map failed\n");
++	printf("FUXI MHI: stage 6 allocating dma buffer\n");
++	kr = kmem_alloc_contig(kernel_map, &win, FW_FW_WIN, 0x3fffu, 0, 0,
++	    KMA_ZERO, VM_KERN_MEMORY_BSD);
++	if (kr != KERN_SUCCESS || win == 0) {
++		printf("FUXI MHI: dma alloc failed %d\n", kr);
 +		return;
 +	}
-+	printf("FUXI MHI: stage 6 window %#lx first word %#x\n", (unsigned long)win,
-+	    *(volatile uint32_t *)win);
++	printf("FUXI MHI: dma buffer kva %#lx\n", (unsigned long)win);
 +	printf("FUXI MHI: stage 6 waiting for vfs\n");
 +	delay(12000000);
 +	printf("FUXI MHI: stage 6 reading firmware\n");
@@ -1783,8 +1787,8 @@
 +		printf("FUXI MHI: no firmware\n");
 +		return;
 +	}
-+	printf("FUXI MHI: fw at %#llx size %u first words %#x %#x %#x %#x\n",
-+	    (unsigned long long)FW_FW_BASE, size,
++	printf("FUXI MHI: fw at %#lx size %u first words %#x %#x %#x %#x\n",
++	    (unsigned long)win, size,
 +	    ((volatile uint32_t *)win)[0], ((volatile uint32_t *)win)[1],
 +	    ((volatile uint32_t *)win)[2], ((volatile uint32_t *)win)[3]);
 +	bhioff = m[0x28 / 4];
@@ -1795,11 +1799,13 @@
 +	bhi = (volatile uint32_t *)((uintptr_t)m + bhioff);
 +	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
 +	bhi[0x2c / 4] = 0;
-+	bhi[0x0c / 4] = 0;
-+	bhi[0x08 / 4] = (uint32_t)FW_FW_BASE;
++	pa = (uint64_t)pmap_extract(kernel_pmap, win);
++	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
++	bhi[0x0c / 4] = (uint32_t)(pa >> 32);
++	bhi[0x08 / 4] = (uint32_t)pa;
 +	bhi[0x10 / 4] = FW_SBL;
 +	bhi[0x18 / 4] = 1;
-+	printf("FUXI MHI: bhi armed addr %#x size %#x\n", (uint32_t)FW_FW_BASE, FW_SBL);
++	printf("FUXI MHI: bhi armed addr %#llx size %#x\n", (unsigned long long)pa, FW_SBL);
 +	for (i = 0; i < 3000; i++) {
 +		status = bhi[0x2c / 4];
 +		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
