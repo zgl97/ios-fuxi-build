@@ -1834,7 +1834,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	printf("FUXI MHI: stage 6 waiting for vfs\n");
 	delay(2000000);
 	printf("FUXI MHI: vfs wait done\n");
-	delay(2000000);
+	delay(10000000);
 	printf("FUXI MHI: stage 6 reading firmware\n");
 	size = fw_read_file(path, win, FW_FW_WIN);
 	if (size == 0) {
