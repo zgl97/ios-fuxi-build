@@ -1569,7 +1569,7 @@ fw_smmu_dump(void)
 	volatile uint32_t *m;
 	unsigned i;
 
-	base = ml_io_map(FW_SMMU, 0x1000);
+	base = ml_io_map(FW_SMMU, 0x20000);
 	if (base == 0) {
 		printf("FUXI SMMU: map failed\n");
 		return;
@@ -1582,6 +1582,20 @@ fw_smmu_dump(void)
 		    m[(0xc00 + i * 4) / 4]);
 	printf("FUXI SMMU: qsmr0 %#x qs2cr0 %#x qs2cr8 %#x\n", m[0x60000 / 4],
 	    m[0x64000 / 4], m[0x64020 / 4]);
+	printf("FUXI SMMU: scan\n");
+	for (i = 0; i < 128; i++) {
+		uint32_t smr = m[(0x800 + i * 4) / 4];
+		if ((smr & 0x80000000u) == 0)
+			continue;
+		printf("FUXI SMMU: smr[%u] sid %#x mask %#x s2cr %#x\n", i,
+		    smr & 0xffffu, (smr >> 16) & 0x1fu, m[(0xc00 + i * 4) / 4]);
+	}
+	for (i = 0; i < 4; i++)
+		printf("FUXI SMMU: cb%u sctlr %#x ttbr0 %#x %#x tcr %#x fsr %#x\n", i,
+		    m[(0x1000 * (i + 1)) / 4], m[(0x1000 * (i + 1) + 0x20) / 4],
+		    m[(0x1000 * (i + 1) + 0x24) / 4], m[(0x1000 * (i + 1) + 0x30) / 4],
+		    m[(0x1000 * (i + 1) + 0x58) / 4]);
+
 }
 
 static void
