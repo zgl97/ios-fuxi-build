@@ -1760,8 +1760,12 @@ fw_mhi_regs(volatile uint32_t *m, uint32_t span)
 		printf("FUXI MHI: level %u\n", level5);
 }
 
+#ifndef pmap_extract
+extern vm_offset_t pmap_extract(pmap_t pmap, vm_offset_t va);
+#endif
+
 #define FW_FW_BASE	0x9fe000000ull	/* 32 MiB GPU scratch, outside the XNU DRAM bank */
-#define FW_FW_WIN	0x2000000u
+#define FW_FW_WIN	0x800000u
 #define FW_SBL		0x80000u	/* ath12k: sbl_size = SZ_512K */
 
 static uint32_t
@@ -1796,7 +1800,7 @@ fw_read_file(const char *path, vm_offset_t buf, uint32_t cap)
 	if (size > cap)
 		size = cap;
 	error = vn_rdwr(UIO_READ, vp, (caddr_t)buf, (int)size, 0, UIO_SYSSPACE,
-	    IO_NODELOCKED | IO_UNIT, ctx, &resid, NULL);
+	    IO_NODELOCKED | IO_UNIT, vfs_context_ucred(ctx), &resid, NULL);
 	printf("FUXI MHI: read %s -> %d resid %d\n", path, error, resid);
 	vnode_put(vp);
 	vfs_context_rele(ctx);
