@@ -1868,12 +1868,12 @@ fw_bhi_boot(volatile uint32_t *m)
 		uint32_t len = (size + 0xfffu) & ~0xfffu;
 		if (len > FW_FW_WIN)
 			len = FW_FW_WIN;
-		r1[0x08 / 4] = FW_DMA_PCI;
-		r1[0x0c / 4] = 0;
-		r1[0x10 / 4] = FW_DMA_PCI + len - 1;
-		r1[0x20 / 4] = 0;
-		r1[0x14 / 4] = (uint32_t)pa;
-		r1[0x18 / 4] = (uint32_t)(pa >> 32);
+		r1[0x08 / 4] = (uint32_t)pa;          /* CPU base */
+		r1[0x0c / 4] = (uint32_t)(pa >> 32);
+		r1[0x10 / 4] = (uint32_t)(pa + len - 1);
+		r1[0x20 / 4] = (uint32_t)((pa + len - 1) >> 32);
+		r1[0x14 / 4] = FW_DMA_PCI;            /* PCI target */
+		r1[0x18 / 4] = 0;
 		r1[0x00 / 4] = 0x0;
 		r1[0x04 / 4] = 1u << 31;
 		printf("FUXI MHI: dma window pci %#x target %#llx len %#x ctrl %#x\n",
