@@ -1632,6 +1632,15 @@ fw_smmu_dump(void)
 				    (unsigned long long)dpa);
 				/* Programming CB0 here aborts the bus on the first write, so
 				 * this pass only reads it back: the loader tries the write. */
+				printf("FUXI SMMU: alt probe begin\n");
+				printf("FUXI SMMU: alt 8000 %#x\n", m[0x8000 / 4]);
+				printf("FUXI SMMU: alt 10000 %#x\n", m[0x10000 / 4]);
+				{
+					volatile uint32_t *st =
+					    (volatile uint32_t *)ml_io_map(0x151fe000u, 0x1000u);
+					printf("FUXI SMMU: alt sec %#x %#x\n", st[0], st[1]);
+				}
+				printf("FUXI SMMU: alt probe done\n");
 				printf("FUXI SMMU: cb0 readback sctlr %#x ttbr0 %#x:%#x tcr %#x\n",
 				    m[0x1000 / 4], m[0x1024 / 4], m[0x1020 / 4], m[0x1030 / 4]);
 				__asm__ volatile("dsb sy" ::: "memory");
