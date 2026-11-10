@@ -40,13 +40,10 @@ static void arm(unsigned seconds) {
 static sigjmp_buf stageJump;static int stageArmed;
 __attribute__((noreturn)) static void fail(const char *fmt,...) {
  char msg[192];va_list a;va_start(a,fmt);vsnprintf(msg,sizeof(msg),fmt,a);va_end(a);
- printf("FUXI MTL: stage %u %s FAIL %s
-",stage,name,msg);
+ printf("FUXI MTL: stage %u %s FAIL %s\n",stage,name,msg);
  if(stageArmed)siglongjmp(stageJump,1);_exit(1);
 }
-#define STAGE(n,nm,body) do{stage=n;name=nm;arm(60);if(sigsetjmp(stageJump,1)==0){stageArmed=1;@autoreleasepool{body;}stageArmed=0;}else{stageArmed=0;printf("FUXI MTL: stage %u %s SKIP after failure
-",stage,name);}}while(0)
-}
+#define STAGE(n,nm,body) do{stage=n;name=nm;arm(60);if(sigsetjmp(stageJump,1)==0){stageArmed=1;@autoreleasepool{body;}stageArmed=0;}else{stageArmed=0;printf("FUXI MTL: stage %u %s SKIP after failure\n",stage,name);}}while(0)
 static unsigned configuration(void) {
  FILE *f=fopen(FUXI_MTL_CONF,"rb");if(!f){if(errno==ENOENT)return 3;fail("config unreadable");}
  char raw[32];size_t n=fread(raw,1,sizeof(raw),f);BOOL bad=ferror(f);fclose(f);
