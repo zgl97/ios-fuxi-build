@@ -2172,27 +2172,13 @@ fw_bhi_boot(volatile uint32_t *m)
 	delay(20000);
 	bhi[0x18 / 4] = 0x5eedu;
 	printf("FUXI MHI: bhi armed file %s addr %#x size %#x\n", path, bhi[0x08 / 4], bhi[0x10 / 4]);
-	cfg = (volatile uint32_t *)ml_io_map(FW_CFG_WIN, 0x100000u);
-	for (i = 0; i < 1000; i++) {
-		uint32_t vid = cfg ? cfg[0] : 0;
-
-		/* Only touch the BAR window while the endpoint still answers configuration
-		 * cycles: a memory read to a vanished endpoint aborts the whole SoC. */
-		if (cfg == 0 || vid == 0xffffffffu || (vid & 0xffffu) != 0x17cbu) {
-			if (cfg)
-				fixed = fw_link_recover(cfg, fw_bar0_saved, fw_cmd_saved);
-			if (i < 3 || (i % 100) == 0)
-				printf("FUXI MHI: poll %u link down vid %#x fixed %#x\n",
-				    i, vid, fixed);
-			delay(10000);
-			continue;
-		}
+	for (i = 0; i < 600; i++) {
 		status = bhi[0x2c / 4];
+		if (i < 20 || (i % 100) == 0)
+			printf("FUXI MHI: poll %u status %#x errcode %#x\n",
+			    i, status, bhi[0x30 / 4]);
 		/* 0xffffffff is the PBL still working, not an error (sheng MhiBoot.c:94) */
-		if (status == 0xffffffffu) {
-			if (cfg)
-				printf("FUXI MHI: poll %u device busy, bar %#x cmd %#x\n",
-				    i, cfg[0x10 / 4], cfg[0x04 / 4]);
+		if (status == 0xffffffffu || ((status >> 30) & 0x3u) == 0u) {
 			delay(10000);
 			continue;
 		}
