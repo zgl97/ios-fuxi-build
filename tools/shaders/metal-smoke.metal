@@ -34,6 +34,27 @@ fragment float4 fuxi_layer_fragment(FuxiM7Varying v [[stage_in]],
     constant float4 &tint [[buffer(1)]]) {
     return layer.sample(filtering,v.uv)*v.color*(fuxi_m7_uniform?tint:float4(1.0f,0.0f,0.0f,1.0f));
 }
+// M9 device coverage: multiple color targets (stage 8).
+struct FuxiMrtOutput {float4 c0 [[color(0)]];float4 c1 [[color(1)]];float4 c2 [[color(2)]];};
+fragment FuxiMrtOutput fuxi_mrt_fragment() {
+    FuxiMrtOutput o;
+    o.c0 = float4(1.0f, 0.0f, 0.0f, 1.0f);
+    o.c1 = float4(0.0f, 0.5f, 0.0f, 1.0f);
+    o.c2 = float4(0.0f, 0.0f, 1.0f, 1.0f);
+    return o;
+}
+// M9 device coverage: sample a selected mip level view (stage 7) and a 3D
+// texture slice (stage 9). Both take the normalized texel step in buffer 0/1.
+fragment float4 fuxi_quad_sample(float4 position [[position]],
+    texture2d<float> image [[texture(0)]],sampler filtering [[sampler(0)]],
+    constant float2 &inverse [[buffer(0)]]) {
+    return image.sample(filtering,position.xy*inverse);
+}
+fragment float4 fuxi_volume_sample(float4 position [[position]],
+    texture3d<float> volume [[texture(0)]],sampler filtering [[sampler(0)]],
+    constant float &slice [[buffer(0)]],constant float2 &inverse [[buffer(1)]]) {
+    return volume.sample(filtering,float3(position.x*inverse.x,position.y*inverse.y,slice));
+}
 // Extra original CI control for the four small fragment slots.
 fragment float4 fuxi_four_fragment(FuxiM7Varying v [[stage_in]],
  texture2d<float> a [[texture(0)]],texture2d<float> b [[texture(1)]],
