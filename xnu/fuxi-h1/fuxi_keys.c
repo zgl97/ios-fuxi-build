@@ -2040,6 +2040,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
 	printf("FUXI MHI: writing bhi status\n");
 	bhi[0x2c / 4] = 0;
+	bhi[0x20 / 4] = 1;            /* BHI INT VEC: the MSI vector the PBL raises */
 	delay(20000);
 	pa = kvtophys(win);
 	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
@@ -2069,11 +2070,16 @@ fw_bhi_boot(volatile uint32_t *m)
 	delay(20000);
 	bhi[0x18 / 4] = 1;
 	printf("FUXI MHI: bhi armed file %s addr %#x size %#x\n", path, bhi[0x08 / 4], bhi[0x10 / 4]);
-	for (i = 0; i < 3000; i++) {
+	for (i = 0; i < 1000; i++) {
 		status = bhi[0x2c / 4];
+		/* 0xffffffff is the PBL still working, not an error (sheng MhiBoot.c:94) */
+		if (status == 0xffffffffu) {
+			delay(10000);
+			continue;
+		}
 		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
 			break;
-		delay(1000);
+		delay(10000);
 	}
 	printf("FUXI MHI: bhi status %#x after %u ms errcode %#x dbg %#x/%#x/%#x\n",
 	    status, i, bhi[0x30 / 4], bhi[0x34 / 4], bhi[0x38 / 4], bhi[0x3c / 4]);
