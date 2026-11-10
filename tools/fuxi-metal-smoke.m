@@ -405,7 +405,10 @@ int main(int argc,char **argv) {
   {struct fuxi_memlimit before={0},limit={1024,0,1024,0};int g=memorystatus_control(FUXI_MEMORYSTATUS_CMD_GET_MEMLIMIT_PROPERTIES,getpid(),0,&before,sizeof(before));
    int r=memorystatus_control(FUXI_MEMORYSTATUS_CMD_SET_MEMLIMIT_PROPERTIES,getpid(),0,&limit,sizeof(limit));int e=r?errno:0;
    printf("FUXI MTL: jetsam limit before %d/%d MB attr %u/%u (rc %d) -> 1024 MB non-fatal rc %d errno %d footprint %llu KiB\n",before.active,before.inactive,before.active_attr,before.inactive_attr,g,r,e,footprint());}
-  id<MTLDevice>device=MTLCreateSystemDefaultDevice();if(!device)fail("MTLCreateSystemDefaultDevice returned nil");
+  unsigned pollSeconds=0;{FILE *pf=fopen("/usr/local/share/fuxi/metal-smoke.poll","rb");if(pf){if(fscanf(pf,"%u",&pollSeconds)!=1)pollSeconds=0;fclose(pf);}}
+ if(pollSeconds>240)pollSeconds=240;if(pollSeconds)arm(pollSeconds+120);
+ id<MTLDevice>device=nil;for(unsigned waited=0;;++waited){device=MTLCreateSystemDefaultDevice();if(device)break;if(waited*2>=pollSeconds)break;if(!waited)printf("FUXI MTL: device not ready, polling up to %u s\n",pollSeconds);sleep(2);}
+ if(!device)fail("MTLCreateSystemDefaultDevice returned nil");
   Class base=objc_getClass("_MTLDevice");
   if(!base || class_getInstanceSize(base)!=528 || strcmp(class_getName(object_getClass(device)),"FuxiMTLDevice") || ![(id)device isKindOfClass:base] || !device.registryID)fail("class/size/registryID guard");
   printf("FUXI MTL: stage 0 discovery PASS name %s class %s base-size %zu instance-size %zu registryID %llu\n",device.name.UTF8String,class_getName(object_getClass(device)),class_getInstanceSize(base),class_getInstanceSize(object_getClass(device)),device.registryID);
