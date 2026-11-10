@@ -44,7 +44,7 @@ static unsigned configuration(void) {
  char raw[32];size_t n=fread(raw,1,sizeof(raw),f);BOOL bad=ferror(f);fclose(f);
  if(bad || n==sizeof(raw))fail("config read/length");
  size_t i=0;while(i<n && strchr(" \t\r\n",raw[i]) && raw[i])++i;
- if(i==n || raw[i]<'0' || raw[i]>'6')fail("config expected max stage 0..6");
+ if(i==n || raw[i]<'0' || raw[i]>'9')fail("config expected max stage 0..9");
  unsigned result=(unsigned)(raw[i++]-'0');while(i<n && raw[i] && strchr(" \t\r\n",raw[i]))++i;
  if(i!=n)fail("config trailing data");return result;
 }
@@ -232,6 +232,167 @@ static void layers(id<MTLDevice>device,id<MTLCommandQueue>q) {
  puts("FUXI MTL: stage 6 layers PASS IOSurface BGRA8 source-over + vertex/index buffers + function constant + fragment bytes + two passes + scissor 65536 pixels + same-memory target + sentinel edges");
  [sampler release];[sd release];[readback release];[indices release];[vertices release];[p release];[pd release];[v release];[f release];[values release];[lib release];for(unsigned i=0;i<3;++i)CFRelease(surfaces[i]);
 }
+// M9 device coverage: a sampled view of one mip level generated on the GPU.
+static void mips(id<MTLDevice>device,id<MTLCommandQueue>q) {
+ MTLTextureDescriptor *td=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:64 height:64 mipmapped:YES];
+ td.storageMode=MTLStorageModeShared;td.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
+ id<MTLTexture>source=[device newTextureWithDescriptor:td];if(!source)fail("mip source allocation");
+ if(source.mipmapLevelCount<4)fail("mip level count %lu",(unsigned long)source.mipmapLevelCount);
+ static const uint8_t want[4]={0x11,0x22,0x33,0xff};
+ uint8_t base[64*64*4];for(size_t i=0;i<sizeof(base);i+=4)memcpy(base+i,want,4);
+ [source replaceRegion:MTLRegionMake2D(0,0,64,64) mipmapLevel:0 withBytes:base bytesPerRow:256];
+ id<MTLCommandBuffer>command=q.commandBuffer;id<MTLBlitCommandEncoder>b=command.blitCommandEncoder;
+ if(!b)fail("mip blit encoder");[b generateMipmapsForTexture:source];[b endEncoding];finish(command);
+ id<MTLBuffer>readback=[device newBufferWithLength:1536 options:MTLResourceStorageModeShared];
+ if(!readback)fail("mip readback allocation");memset(readback.contents,0x39,readback.length);
+ command=q.commandBuffer;b=command.blitCommandEncoder;
+ [b copyFromTexture:source sourceSlice:0 sourceLevel:3 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(16,16,1)
+  toBuffer:readback destinationOffset:256 destinationBytesPerRow:64 destinationBytesPerImage:1024];[b endEncoding];finish(command);
+ verify(readback,0,256,0x39);verify(readback,1280,256,0x39);
+ const uint8_t *mip=(const uint8_t *)readback.contents+256;
+ for(unsigned i=0;i<16*16;++i)if(memcmp(mip+i*4,want,4))fail("mip level 3 texel %u",i);
+ id<MTLTexture>view=[source newTextureViewWithPixelFormat:MTLPixelFormatBGRA8Unorm textureType:MTLTextureType2D
+  levels:NSMakeRange(3,1) slices:NSMakeRange(0,1)];
+ MTLTextureDescriptor *targetDescriptor=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:16 height:16 mipmapped:NO];
+ targetDescriptor.storageMode=MTLStorageModeShared;targetDescriptor.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
+ id<MTLTexture>target=[device newTextureWithDescriptor:targetDescriptor];
+ if(!view || !target)fail("mip level view/target");
+ NSError *error=nil;id<MTLLibrary>lib=[device newLibraryWithURL:[NSURL fileURLWithPath:@FUXI_MTL_METALLIB] error:&error];
+ if(!lib || error)fail("mip library %s",error.description.UTF8String);
+ id<MTLFunction>v=[lib newFunctionWithName:@"fuxi_quad"],f=[lib newFunctionWithName:@"fuxi_quad_sample"];
+ if(!v || !f)fail("mip functions");
+ MTLRenderPipelineDescriptor *pd=[MTLRenderPipelineDescriptor new];pd.vertexFunction=v;pd.fragmentFunction=f;pd.colorAttachments[0].pixelFormat=MTLPixelFormatBGRA8Unorm;
+ id<MTLRenderPipelineState>p=[device newRenderPipelineStateWithDescriptor:pd error:&error];
+ if(!p || error)fail("mip pipeline %s",error.description.UTF8String);
+ MTLSamplerDescriptor *sd=[MTLSamplerDescriptor new];id<MTLSamplerState>sampler=[device newSamplerStateWithDescriptor:sd];
+ if(!sampler)fail("mip sampler");
+ memset(readback.contents,0x39,readback.length);
+ @autoreleasepool {
+  MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];pass.colorAttachments[0].texture=target;
+  pass.colorAttachments[0].loadAction=MTLLoadActionClear;pass.colorAttachments[0].storeAction=MTLStoreActionStore;
+  pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,1);
+  command=q.commandBuffer;id<MTLRenderCommandEncoder>r=[command renderCommandEncoderWithDescriptor:pass];if(!r)fail("mip pass");
+  [r setRenderPipelineState:p];[r setFragmentTexture:view atIndex:0];[r setFragmentSamplerState:sampler atIndex:0];
+  float inverse[2]={1.0f/16.0f,1.0f/16.0f};[r setFragmentBytes:inverse length:sizeof(inverse) atIndex:0];
+  [r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];[r endEncoding];
+  b=command.blitCommandEncoder;if(!b)fail("mip sampled readback");
+  [b copyFromTexture:target sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(16,16,1)
+   toBuffer:readback destinationOffset:256 destinationBytesPerRow:64 destinationBytesPerImage:1024];[b endEncoding];finish(command);
+ }
+ verify(readback,0,256,0x39);verify(readback,1280,256,0x39);
+ const uint8_t *sampled=(const uint8_t *)readback.contents+256;
+ for(unsigned i=0;i<16*16;++i)if(memcmp(sampled+i*4,want,4))fail("mip sampled texel %u",i);
+ [sampler release];[sd release];[p release];[pd release];[v release];[f release];[lib release];
+ [target release];[view release];[readback release];[source release];
+ puts("FUXI MTL: stage 7 mips PASS generateMipmaps 64x64 -> level 3 copy 256 texels + level 3 view sampled 256 texels");
+}
+// M9 device coverage: three color targets carrying different formats at once.
+static void mrt(id<MTLDevice>device,id<MTLCommandQueue>q) {
+ const MTLPixelFormat formats[3]={MTLPixelFormatBGRA8Unorm,MTLPixelFormatRGBA16Float,MTLPixelFormatRGBA8Unorm};
+ id<MTLTexture>targets[3]={nil,nil,nil};
+ MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];
+ MTLRenderPipelineDescriptor *pd=[MTLRenderPipelineDescriptor new];
+ for(unsigned i=0;i<3;++i) {
+  MTLTextureDescriptor *td=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:formats[i] width:32 height:32 mipmapped:NO];
+  td.storageMode=MTLStorageModeShared;td.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
+  targets[i]=[device newTextureWithDescriptor:td];if(!targets[i])fail("mrt target %u allocation",i);
+  MTLRenderPassColorAttachmentDescriptor *a=pass.colorAttachments[i];
+  a.texture=targets[i];a.loadAction=MTLLoadActionClear;a.storeAction=MTLStoreActionStore;
+  a.clearColor=MTLClearColorMake(0,0,0,1);pd.colorAttachments[i].pixelFormat=formats[i];
+ }
+ NSError *error=nil;id<MTLLibrary>lib=[device newLibraryWithURL:[NSURL fileURLWithPath:@FUXI_MTL_METALLIB] error:&error];
+ if(!lib || error)fail("mrt library %s",error.description.UTF8String);
+ id<MTLFunction>v=[lib newFunctionWithName:@"fuxi_quad"],f=[lib newFunctionWithName:@"fuxi_mrt_fragment"];
+ if(!v || !f)fail("mrt functions");
+ pd.vertexFunction=v;pd.fragmentFunction=f;
+ id<MTLRenderPipelineState>p=[device newRenderPipelineStateWithDescriptor:pd error:&error];
+ if(!p || error)fail("mrt pipeline %s",error.description.UTF8String);
+ @autoreleasepool {
+  id<MTLCommandBuffer>command=q.commandBuffer;id<MTLRenderCommandEncoder>r=[command renderCommandEncoderWithDescriptor:pass];
+  if(!r)fail("mrt pass");[r setRenderPipelineState:p];[r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];[r endEncoding];finish(command);
+ }
+ const uint8_t want0[4]={0x00,0x00,0xff,0xff};   // BGRA8 c0 = red
+ const uint8_t want1[8]={0x00,0x00,0x00,0x38,0x00,0x00,0x00,0x3c}; // RGBA16Float c1 = (0,.5,0,1)
+ const uint8_t want2[4]={0x00,0x00,0xff,0xff};   // RGBA8 c2 = blue
+ for(unsigned i=0;i<3;++i) {
+  unsigned size=i==1?8:4;size_t pixelBytes=32*32*size;
+  id<MTLBuffer>readback=[device newBufferWithLength:pixelBytes+512 options:MTLResourceStorageModeShared];
+  if(!readback)fail("mrt readback %u allocation",i);memset(readback.contents,0x39,pixelBytes+512);
+  id<MTLCommandBuffer>command=q.commandBuffer;id<MTLBlitCommandEncoder>b=command.blitCommandEncoder;if(!b)fail("mrt readback %u encoder",i);
+  [b copyFromTexture:targets[i] sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(32,32,1)
+   toBuffer:readback destinationOffset:256 destinationBytesPerRow:32*size destinationBytesPerImage:pixelBytes];[b endEncoding];finish(command);
+  verify(readback,0,256,0x39);verify(readback,256+pixelBytes,256,0x39);
+  const uint8_t *pixels=(const uint8_t *)readback.contents+256;
+  int matches=1;
+  for(uint32_t texel=0;texel<32*32;++texel) {
+   const uint8_t *want=i==1?want1:(i==0?want0:want2);
+   if(memcmp(pixels+texel*size,want,size)){matches=0;break;}
+  }
+  if(!matches)fail("mrt target %u texel mismatch",i);
+  [readback release];
+ }
+ for(unsigned i=0;i<3;++i)[targets[i] release];
+ [p release];[pd release];[v release];[f release];[lib release];
+ puts("FUXI MTL: stage 8 mrt PASS BGRA8 + RGBA16Float + RGBA8 targets 1024 texels each");
+}
+// M9 device coverage: 3D texture upload, plane copy and slice sampling.
+static void volume(id<MTLDevice>device,id<MTLCommandQueue>q) {
+ MTLTextureDescriptor *td=[MTLTextureDescriptor new];
+ td.textureType=MTLTextureType3D;td.pixelFormat=MTLPixelFormatRGBA8Unorm;
+ td.width=16;td.height=16;td.depth=4;td.usage=MTLTextureUsageShaderRead;td.storageMode=MTLStorageModeShared;
+ id<MTLTexture>texture=[device newTextureWithDescriptor:td];if(!texture)fail("volume allocation");
+ if(texture.depth!=4 || texture.textureType!=MTLTextureType3D)fail("volume shape");
+ uint8_t planes[4][16*16*4];
+ for(unsigned z=0;z<4;++z)for(size_t i=0;i<sizeof(planes[0]);i+=4) {
+  planes[z][i]=(uint8_t)(z*64+1);planes[z][i+1]=(uint8_t)(z*64+2);planes[z][i+2]=(uint8_t)(z*64+3);planes[z][i+3]=0xff;
+ }
+ for(unsigned z=0;z<4;++z)
+  [texture replaceRegion:MTLRegionMake3D(0,0,z,16,16,1) mipmapLevel:0 slice:0 withBytes:planes[z] bytesPerRow:64 bytesPerImage:1024];
+ for(unsigned z=0;z<4;++z) {
+  id<MTLBuffer>readback=[device newBufferWithLength:1536 options:MTLResourceStorageModeShared];
+  if(!readback)fail("volume readback allocation");memset(readback.contents,0x39,readback.length);
+  id<MTLCommandBuffer>command=q.commandBuffer;id<MTLBlitCommandEncoder>b=command.blitCommandEncoder;if(!b)fail("volume readback encoder");
+  [b copyFromTexture:texture sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,z) sourceSize:MTLSizeMake(16,16,1)
+   toBuffer:readback destinationOffset:256 destinationBytesPerRow:64 destinationBytesPerImage:1024];[b endEncoding];finish(command);
+  verify(readback,0,256,0x39);verify(readback,1280,256,0x39);
+  const uint8_t *plane=(const uint8_t *)readback.contents+256;
+  for(unsigned i=0;i<16*16;++i)if(memcmp(plane+i*4,planes[z]+i*4,4))fail("volume plane %u texel %u",z,i);
+  [readback release];
+ }
+ MTLTextureDescriptor *targetDescriptor=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA8Unorm width:16 height:16 mipmapped:NO];
+ targetDescriptor.storageMode=MTLStorageModeShared;targetDescriptor.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
+ id<MTLTexture>target=[device newTextureWithDescriptor:targetDescriptor];if(!target)fail("volume target allocation");
+ NSError *error=nil;id<MTLLibrary>lib=[device newLibraryWithURL:[NSURL fileURLWithPath:@FUXI_MTL_METALLIB] error:&error];
+ if(!lib || error)fail("volume library %s",error.description.UTF8String);
+ id<MTLFunction>v=[lib newFunctionWithName:@"fuxi_quad"],f=[lib newFunctionWithName:@"fuxi_volume_sample"];
+ if(!v || !f)fail("volume functions");
+ MTLRenderPipelineDescriptor *pd=[MTLRenderPipelineDescriptor new];pd.vertexFunction=v;pd.fragmentFunction=f;pd.colorAttachments[0].pixelFormat=MTLPixelFormatRGBA8Unorm;
+ id<MTLRenderPipelineState>p=[device newRenderPipelineStateWithDescriptor:pd error:&error];
+ if(!p || error)fail("volume pipeline %s",error.description.UTF8String);
+ MTLSamplerDescriptor *sd=[MTLSamplerDescriptor new];id<MTLSamplerState>sampler=[device newSamplerStateWithDescriptor:sd];
+ if(!sampler)fail("volume sampler");
+ id<MTLBuffer>readback=[device newBufferWithLength:1536 options:MTLResourceStorageModeShared];
+ if(!readback)fail("volume sampled readback allocation");memset(readback.contents,0x39,readback.length);
+ @autoreleasepool {
+  MTLRenderPassDescriptor *pass=[MTLRenderPassDescriptor renderPassDescriptor];pass.colorAttachments[0].texture=target;
+  pass.colorAttachments[0].loadAction=MTLLoadActionClear;pass.colorAttachments[0].storeAction=MTLStoreActionStore;
+  pass.colorAttachments[0].clearColor=MTLClearColorMake(0,0,0,1);
+  id<MTLCommandBuffer>command=q.commandBuffer;id<MTLRenderCommandEncoder>r=[command renderCommandEncoderWithDescriptor:pass];if(!r)fail("volume pass");
+  [r setRenderPipelineState:p];[r setFragmentTexture:texture atIndex:0];[r setFragmentSamplerState:sampler atIndex:0];
+  float slice=(2.0f+0.5f)/4.0f;[r setFragmentBytes:&slice length:sizeof(slice) atIndex:0];
+  float inverse[2]={1.0f/16.0f,1.0f/16.0f};[r setFragmentBytes:inverse length:sizeof(inverse) atIndex:1];
+  [r drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:6];[r endEncoding];
+  id<MTLBlitCommandEncoder>b=command.blitCommandEncoder;if(!b)fail("volume sampled readback encoder");
+  [b copyFromTexture:target sourceSlice:0 sourceLevel:0 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(16,16,1)
+   toBuffer:readback destinationOffset:256 destinationBytesPerRow:64 destinationBytesPerImage:1024];[b endEncoding];finish(command);
+ }
+ verify(readback,0,256,0x39);verify(readback,1280,256,0x39);
+ const uint8_t *pixels=(const uint8_t *)readback.contents+256;
+ for(unsigned i=0;i<16*16;++i)if(memcmp(pixels+i*4,planes[2]+i*4,4))fail("volume sampled texel %u",i);
+ [readback release];[sampler release];[sd release];[p release];[pd release];[v release];[f release];[lib release];
+ [target release];[texture release];
+ puts("FUXI MTL: stage 9 volume PASS 16x16x4 RGBA8 planes 1024 texels + slice 2 sampled 256 texels");
+}
 int main(int argc,char **argv) {
  (void)argc;(void)argv;setvbuf(stdout,NULL,_IONBF,0);setvbuf(stderr,NULL,_IONBF,0);signal(SIGALRM,expired);arm(30);
  @autoreleasepool { @try {
@@ -262,6 +423,9 @@ int main(int argc,char **argv) {
    if(maximum>=4) {stage=4;name="pipeline";arm(60);@autoreleasepool {pipeline(device,q);}printf("FUXI MTL: stage 4 footprint %llu KiB\n",footprint());}
    if(maximum>=5) {stage=5;name="composition";arm(60);@autoreleasepool {composition(device,q);}printf("FUXI MTL: stage 5 footprint %llu KiB\n",footprint());}
    if(maximum>=6) {stage=6;name="layers";arm(60);@autoreleasepool {layers(device,q);}printf("FUXI MTL: stage 6 footprint %llu KiB\n",footprint());}
+   if(maximum>=7) {stage=7;name="mips";arm(60);@autoreleasepool {mips(device,q);}printf("FUXI MTL: stage 7 footprint %llu KiB\n",footprint());}
+   if(maximum>=8) {stage=8;name="mrt";arm(60);@autoreleasepool {mrt(device,q);}printf("FUXI MTL: stage 8 footprint %llu KiB\n",footprint());}
+   if(maximum>=9) {stage=9;name="volume";arm(60);@autoreleasepool {volume(device,q);}printf("FUXI MTL: stage 9 footprint %llu KiB\n",footprint());}
    arm(10);[a release];[q release];
   }
   [device release];alarm(0);puts("FUXI MTL: done PASS");
