@@ -1619,7 +1619,7 @@ fw_smmu_dump(void)
 				t2 = (uint64_t *)l2;
 				t1[(FW_IOVA >> 30) & 3u] = p2 | 3u;
 				for (i = 0; i < 4; i++)
-					t2[((FW_IOVA >> 21) & 0x1ffu) + i] = (dpa + (uint64_t)i * 0x200000u) | 0x441u;
+					t2[((FW_IOVA >> 21) & 0x1ffu) + i] = (dpa + (uint64_t)i * 0x200000u) | 0x443u;
 				__asm__ volatile("dsb sy" ::: "memory");
 				printf("FUXI SMMU: l1[%u] %#llx l2[%u] %#llx dpa %#llx\n",
 				    (FW_IOVA >> 30) & 3u, (unsigned long long)t1[(FW_IOVA >> 30) & 3u],
@@ -1629,11 +1629,11 @@ fw_smmu_dump(void)
 				m[0x2000 / 4] = 0;
 				m[0x2020 / 4] = (uint32_t)p1;
 				m[0x2024 / 4] = (uint32_t)(p1 >> 32);
-				m[0x2030 / 4] = 16u;
+				m[0x2030 / 4] = 32u;
 				m[0x2008 / 4] = 0;
 				m[0x200c / 4] = 0;
 				__asm__ volatile("dsb sy" ::: "memory");
-				m[0x2000 / 4] = 0x31u;
+				m[0x2000 / 4] = 0x141u;
 				__asm__ volatile("dsb sy" ::: "memory");
 				m[0x820 / 4] = 0x80000000u | 0x1400u;
 				m[0x824 / 4] = 0x80000000u | 0x1401u;
@@ -1643,6 +1643,9 @@ fw_smmu_dump(void)
 				printf("FUXI SMMU: smr8 %#x smr9 %#x s2cr8 %#x s2cr9 %#x sctlr %#x\n",
 				    m[0x820 / 4], m[0x824 / 4], m[0xc20 / 4], m[0xc24 / 4],
 				    m[0x2000 / 4]);
+				printf("FUXI SMMU: cb0 sctlr %#x ttbr0 %#x:%#x tcr %#x fsr %#x fsynr0 %#x gfsr %#x\n",
+				    m[0x2000 / 4], m[0x2024 / 4], m[0x2020 / 4], m[0x2030 / 4],
+				    m[0x2058 / 4], m[0x2068 / 4], m[0x48 / 4]);
 				fw_smmu_win = dma2;
 				fw_bhi_addr = FW_IOVA;
 				fw_bhi_boot((volatile uint32_t *)ml_io_map(bar0, FW_MHI_SZ));
@@ -2063,6 +2066,14 @@ fw_bhi_boot(volatile uint32_t *m)
 	    status, i, bhi[0x30 / 4], bhi[0x34 / 4], bhi[0x38 / 4], bhi[0x3c / 4]);
 	printf("FUXI MHI: execenv %#x numseg %#x state %#x\n", bhi[0x28 / 4],
 	    bhi[0x48 / 4], (m[0x48 / 4] >> 8) & 0xffu);
+	if (status == 0xffffffffu || ((status >> 30) & 0x3u) == 3u) {
+		volatile uint32_t *sm = (volatile uint32_t *)ml_io_map(0x15000000u, 0x20000u);
+		delay(200000);
+		printf("FUXI MHI: retry status %#x errcode %#x state %#x\n",
+		    bhi[0x2c / 4], bhi[0x30 / 4], (m[0x48 / 4] >> 8) & 0xffu);
+		printf("FUXI SMMU: fault gfsr %#x gfsynr0 %#x gfsynr1 %#x cb0fsr %#x cb0fsynr0 %#x\n",
+		    sm[0x48 / 4], sm[0x4c / 4], sm[0x50 / 4], sm[0x2058 / 4], sm[0x2068 / 4]);
+	}
 	printf("FUXI MHI: stage 6 done\n");
 }
 
