@@ -1108,7 +1108,14 @@ static uint64_t refreshCommandShadows(FuxiCommandBuffer *command){
    FuxiBuffer *b=[FuxiBuffer new];b->_device=[_command->_queue->_device retain];
    try{b->_buffer=owner(b->_device)->backend->allocate(capacity);b->_buffer->upload=true;}catch(...){[b release];throw;}return b;
   },[](FuxiBuffer *b){return b->_buffer->contents;});
-  [self setBuffer:slice.handle offset:slice.offset index:i stage:stage bytes:YES];_state.buffers[stage][i].end=slice.offset+slice.length;
+  FuxiBuffer *handle=slice.handle;NSUInteger offset=slice.offset;
+  if(offset){
+   // metal2vulkan's inline-bytes path only accepts offset 0, so give this call its own buffer.
+   FuxiBuffer *own=[FuxiBuffer new];own->_device=[_command->_queue->_device retain];
+   try{own->_buffer=owner(own->_device)->backend->allocate(4096);own->_buffer->upload=true;}catch(...){[own release];throw;}
+   memcpy(own->_buffer->contents,bytes,n);handle=own;offset=0;[own release];
+  }
+  [self setBuffer:handle offset:offset index:i stage:stage bytes:YES];_state.buffers[stage][i].end=offset+n;
  }catch(const std::exception &e){invalid([NSString stringWithUTF8String:e.what()]);}
 }
 - (void)setVertexBytes:(const void *)bytes length:(NSUInteger)n atIndex:(NSUInteger)i {FRONTEND_TIME(_command);FUXI_PHASE(bufBytes);@try {CENSUS();DescriptorContext descriptor(_passText);[self setBytes:bytes length:n index:i stage:0];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
