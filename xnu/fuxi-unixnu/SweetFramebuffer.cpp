@@ -212,6 +212,7 @@ public:
   * counters are the only figures comparable between the GPU and CPU paths.
   */
  uint64_t      fScanoutWinAbs, fScanoutLastAbs, fScanoutGapMax, fScanoutMaxActive;
+ uint64_t      fScanoutActiveNs;
  /* Gap buckets for presents that follow another within 50 ms: under the
   * 8.33 ms deadline, then 8.33-16.7, 16.7-33.3, 33.3-50 ms. Anything slower
   * is an idle screen, not a late frame, so it is counted separately.
@@ -1701,6 +1702,7 @@ AppleCLCD::scanoutLog(bool gpu, uint64_t bytes, uint64_t copy, uint64_t prepare)
   if (gapNs > 50000000ull) ++fScanoutIdle;
   else {
    if (gapAbs > fScanoutMaxActive) fScanoutMaxActive = gapAbs;
+   fScanoutActiveNs += gapNs;
    /* 8333333 ns is the 120 Hz deadline; the rest are 2x, 4x and 6x frames. */
    if (gapNs <= 8333333ull) ++fScanoutGapBins[0];
    else if (gapNs <= 16666667ull) ++fScanoutGapBins[1];
@@ -1721,15 +1723,20 @@ AppleCLCD::scanoutLog(bool gpu, uint64_t bytes, uint64_t copy, uint64_t prepare)
   absolutetime_to_nanoseconds(fScanoutGapMax, &gapNs);
   absolutetime_to_nanoseconds(fScanoutMaxActive, &activeNs);
   uint64_t fpsX100 = winNs ? (uint64_t)fScanoutWinFrames * 100000000000ULL / winNs : 0;
+  uint64_t activeFrames = (uint64_t)fScanoutGapBins[0] + fScanoutGapBins[1] +
+      fScanoutGapBins[2] + fScanoutGapBins[3];
+  uint64_t activeFpsX100 = fScanoutActiveNs ? activeFrames * 100000000000ULL / fScanoutActiveNs : 0;
   IOLog("FUXI SCANOUT: summary frames=%u GPU=%u CPU=%u copy_avg_us=%llu copy_max_us=%llu deferred=%u "
       "win_us=%llu win_frames=%u fps=%llu.%02llu max_gap_us=%llu idle=%u "
-      "gap_8330=%u gap_16700=%u gap_33300=%u gap_50000=%u max_active_gap_us=%llu\n",
+      "gap_8330=%u gap_16700=%u gap_33300=%u gap_50000=%u max_active_gap_us=%llu "
+      "active_ms=%llu active_fps=%llu.%02llu\n",
       fScanoutFrames, fScanoutGpu, fScanoutCpu, fScanoutTime/1000/fScanoutFrames,
       fScanoutMax/1000, fScanoutDefers, winNs/1000, fScanoutWinFrames, fpsX100/100, fpsX100%100,
       gapNs/1000, fScanoutIdle, fScanoutGapBins[0], fScanoutGapBins[1], fScanoutGapBins[2],
-      fScanoutGapBins[3], activeNs/1000);
+      fScanoutGapBins[3], activeNs/1000, fScanoutActiveNs/1000000, activeFpsX100/100,
+      activeFpsX100%100);
   fScanoutWinAbs = nowAbs; fScanoutWinFrames = 0; fScanoutGapMax = 0; fScanoutIdle = 0;
-  fScanoutMaxActive = 0;
+  fScanoutMaxActive = 0; fScanoutActiveNs = 0;
   fScanoutGapBins[0] = fScanoutGapBins[1] = fScanoutGapBins[2] = fScanoutGapBins[3] = 0;
  }
 #else
