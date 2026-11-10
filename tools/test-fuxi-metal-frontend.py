@@ -213,7 +213,9 @@ def main():
             out=run(str(stage).encode());assert 'stage %u '%stage in out and 'done PASS' in out
             assert 'stage %u '%(stage+1) not in out
         for bad in (b'',b'10',b'-1',b'1junk',b'3\0',b'1'*32):assert 'stage 0 discovery FAIL' in run(bad,1)
-        assert 'stage 4 pipeline FAIL' in run(b'4',1)
+        out=run(b'4')
+        assert 'stage 4 pipeline FAIL' in out and 'stage 4 pipeline SKIP after failure' in out,out
+        assert 'done PASS' in out,out
         assert 'stage 0 discovery FAIL' in run(b'3',1,FUXI_TEST_NOT_ROOT='1')
         assert 'returned nil' in run(b'3',1,FUXI_TEST_NO_DEVICE='1')
         assert 'stage 1 fill FAIL' in run(b'3',1,FUXI_TEST_LOST='1')
