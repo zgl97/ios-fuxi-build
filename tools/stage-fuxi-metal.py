@@ -95,8 +95,8 @@ def stage(root,icd,bundle,smoke,conf,clients=Path(__file__).with_name('metal-cli
     if os.geteuid()!=0:raise PermissionError('run as root to set root:wheel 0:0')
     root=root.resolve()
     if not (root/'System/Library').is_dir():raise ValueError('expected mounted iOS root')
-    if not re.fullmatch(rb'[ \t\r\n]*[0-6][ \t\r\n]*',conf.read_bytes()) or conf.stat().st_size>31:
-        raise ValueError('config must contain max stage 0..6')
+    if not re.fullmatch(rb'[ \t\r\n]*[0-9]{1,2}[ \t\r\n]*',conf.read_bytes()) or conf.stat().st_size>31:
+        raise ValueError('config must contain max stage 0..10')
     if not re.fullmatch(rb'[ \t\r\n]*[0-5][ \t\r\n]*',ca_conf.read_bytes()) or ca_conf.stat().st_size>31:
         raise ValueError('CA config must contain max stage 0..5')
     if ca_smoke is None:ca_smoke=smoke.parent/'fuxi-ca-smoke'
