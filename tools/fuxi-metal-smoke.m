@@ -251,13 +251,13 @@ static void mips(id<MTLDevice>device,id<MTLCommandQueue>q) {
  id<MTLBuffer>readback=[device newBufferWithLength:1536 options:MTLResourceStorageModeShared];
  if(!readback)fail("mip readback allocation");memset(readback.contents,0x39,readback.length);
  command=q.commandBuffer;b=command.blitCommandEncoder;
- [b copyFromTexture:source sourceSlice:0 sourceLevel:3 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(16,16,1)
+ [b copyFromTexture:source sourceSlice:0 sourceLevel:2 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(16,16,1)
   toBuffer:readback destinationOffset:256 destinationBytesPerRow:64 destinationBytesPerImage:1024];[b endEncoding];finish(command);
  verify(readback,0,256,0x39);verify(readback,1280,256,0x39);
  const uint8_t *mip=(const uint8_t *)readback.contents+256;
- for(unsigned i=0;i<16*16;++i)if(memcmp(mip+i*4,want,4))fail("mip level 3 texel %u",i);
+ for(unsigned i=0;i<16*16;++i)if(memcmp(mip+i*4,want,4))fail("mip level 2 texel %u",i);
  id<MTLTexture>view=[source newTextureViewWithPixelFormat:MTLPixelFormatBGRA8Unorm textureType:MTLTextureType2D
-  levels:NSMakeRange(3,1) slices:NSMakeRange(0,1)];
+  levels:NSMakeRange(2,1) slices:NSMakeRange(0,1)];
  MTLTextureDescriptor *targetDescriptor=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:16 height:16 mipmapped:NO];
  targetDescriptor.storageMode=MTLStorageModeShared;targetDescriptor.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
  id<MTLTexture>target=[device newTextureWithDescriptor:targetDescriptor];
@@ -289,7 +289,7 @@ static void mips(id<MTLDevice>device,id<MTLCommandQueue>q) {
  for(unsigned i=0;i<16*16;++i)if(memcmp(sampled+i*4,want,4))fail("mip sampled texel %u",i);
  [sampler release];[sd release];[p release];[pd release];[v release];[f release];[lib release];
  [target release];[view release];[readback release];[source release];
- puts("FUXI MTL: stage 7 mips PASS generateMipmaps 64x64 -> level 3 copy 256 texels + level 3 view sampled 256 texels");
+ puts("FUXI MTL: stage 7 mips PASS generateMipmaps 64x64 -> level 2 (16x16) copy 256 texels + level 2 view sampled 256 texels");
 }
 // M9 device coverage: three color targets carrying different formats at once.
 static void mrt(id<MTLDevice>device,id<MTLCommandQueue>q) {
