@@ -1225,6 +1225,8 @@ static uint32_t fw_stage;
 static vm_offset_t fw_smmu_win;
 static uint32_t fw_bar0_saved, fw_cmd_saved;
 extern uint64_t kvtophys(vm_offset_t va);
+static void fw_mhi_contexts(volatile uint32_t *m, uint8_t *base, uint64_t iova);
+static uint32_t fw_link_recover(volatile uint32_t *cfg, uint32_t bar0, uint32_t cmd);
 static uint32_t fw_bhi_addr;
 static vm_offset_t bar0;
 static void fw_atu_dump(volatile uint32_t *);
