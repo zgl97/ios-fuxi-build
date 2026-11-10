@@ -1979,7 +1979,20 @@ fw_bhi_boot(volatile uint32_t *m)
 	uint64_t pa = 0;
 	unsigned low_dma = 0;
 	uint32_t span, bhioff, size, status = 0, i;
+	char fwname[32];
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
+	strlcpy(fwname, "amss.bin", sizeof(fwname));
+	PE_parse_boot_argn("fuxiwifw", fwname, sizeof(fwname));
+	if (fwname[0] != 0) {
+		static char pbuf[96];
+		const char *dir = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/";
+		size_t dl = strlen(dir);
+		if (dl + strlen(fwname) + 1 < sizeof(pbuf)) {
+			memcpy(pbuf, dir, dl);
+			strlcpy(pbuf + dl, fwname, sizeof(pbuf) - dl);
+			path = pbuf;
+		}
+	}
 
 	printf("FUXI MHI: stage 6 starting\n");
 	span = FW_MHI_SZ;   /* mapping size, not MHI_REGLEN (0x100) */
@@ -2051,11 +2064,11 @@ fw_bhi_boot(volatile uint32_t *m)
 	}
 	bhi[0x0c / 4] = 0;
 	bhi[0x08 / 4] = fw_smmu_win ? fw_bhi_addr : FW_DMA_PCI;
-	bhi[0x10 / 4] = FW_SBL;
+	bhi[0x10 / 4] = (uint32_t)((size + 0xfffu) & ~0xfffu);
 	printf("FUXI MHI: writing doorbell\n");
 	delay(20000);
 	bhi[0x18 / 4] = 1;
-	printf("FUXI MHI: bhi armed addr %#x size %#x\n", bhi[0x08 / 4], FW_SBL);
+	printf("FUXI MHI: bhi armed file %s addr %#x size %#x\n", path, bhi[0x08 / 4], bhi[0x10 / 4]);
 	for (i = 0; i < 3000; i++) {
 		status = bhi[0x2c / 4];
 		if (((status >> 30) & 0x3u) == 2u || ((status >> 30) & 0x3u) == 3u)
@@ -2064,6 +2077,11 @@ fw_bhi_boot(volatile uint32_t *m)
 	}
 	printf("FUXI MHI: bhi status %#x after %u ms errcode %#x dbg %#x/%#x/%#x\n",
 	    status, i, bhi[0x30 / 4], bhi[0x34 / 4], bhi[0x38 / 4], bhi[0x3c / 4]);
+	if (fw_atu_ptr && fw_dbi_ptr) {
+		volatile uint32_t *pf = fw_atu_ptr;
+		printf("FUXI MHI: link parf ltssm %#x dbi id %#x linkctl %#x reglen %#x\n",
+		    pf[0x1b0 / 4], fw_dbi_ptr[0], fw_dbi_ptr[0x80 / 4], m[0x00 / 4]);
+	}
 	printf("FUXI MHI: execenv %#x numseg %#x state %#x\n", bhi[0x28 / 4],
 	    bhi[0x48 / 4], (m[0x48 / 4] >> 8) & 0xffu);
 	if (status == 0xffffffffu || ((status >> 30) & 0x3u) == 3u) {
