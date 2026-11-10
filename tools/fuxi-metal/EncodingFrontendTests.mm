@@ -36,11 +36,11 @@ int main(){@autoreleasepool{
  [inlineRender setVertexBytes:firstBytes length:sizeof(firstBytes) atIndex:0];[inlineRender drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];
  memset(firstBytes,0xff,sizeof(firstBytes));[inlineRender setVertexBytes:nextBytes length:sizeof(nextBytes) atIndex:0];[inlineRender drawPrimitives:MTLPrimitiveTypeTriangle vertexStart:0 vertexCount:3];[inlineRender endEncoding];
  auto firstBinding=inlineCommand->_ops[0].buffers[0][0],nextBinding=inlineCommand->_ops[1].buffers[0][0];
- assert(firstBinding.buffer->upload && firstBinding.buffer==nextBinding.buffer && firstBinding.offset==0 && nextBinding.offset==256 && firstBinding.length()==37 && nextBinding.length()==384);
- assert(((uint8_t *)firstBinding.buffer->contents)[0]==0x43 && !((uint8_t *)firstBinding.buffer->contents)[37]);
+ assert(firstBinding.buffer->upload && nextBinding.buffer->upload && firstBinding.buffer!=nextBinding.buffer && firstBinding.offset==0 && nextBinding.offset==0 && firstBinding.length()==37 && nextBinding.length()==128);
+ assert(((uint8_t *)firstBinding.buffer->contents)[0]==0x43 && !((uint8_t *)firstBinding.buffer->contents)[37] && ((uint8_t *)nextBinding.buffer->contents)[0]==0x65 && !((uint8_t *)nextBinding.buffer->contents)[128]);
  auto uploadBuffer=firstBinding.buffer;unsigned inlineDraws=0;fuxi::Backend::modelDraw=[&](const fuxi::Operation &op){auto b=op.buffers[0][0];assert(b.bytes && b.length()-b.offset==(inlineDraws?128:37));++inlineDraws;};
  [inlineCommand commit];assert(!inlineCommand.error && inlineDraws==2);
  FuxiCommandBuffer *reused=(FuxiCommandBuffer *)[queue commandBuffer];FuxiRender *reusedRender=(FuxiRender *)[reused renderCommandEncoderWithDescriptor:pass];
- [reusedRender setVertexBytes:nextBytes length:sizeof(nextBytes) atIndex:0];assert(reusedRender->_state.buffers[0][0].buffer==uploadBuffer);[reusedRender endEncoding];[reused commit];assert(!reused.error);
+ [reusedRender setVertexBytes:nextBytes length:sizeof(nextBytes) atIndex:0];auto reusedBinding=reusedRender->_state.buffers[0][0];assert(reusedBinding.buffer && reusedBinding.buffer->upload && reusedBinding.bytes && reusedBinding.offset==0 && ((const uint8_t *)reusedBinding.buffer->contents)[0]==0x65);[reusedRender endEncoding];[reused commit];assert(!reused.error);
  fuxi::Backend::modelDraw={};[pipeline release];[sampler release];[sample release];[target release];[queue release];[device release];
  }assert(fuxi::Backend::live==0);puts("PASS: exact command ownership/release, encoder rebinds, reason escalation and redundant-state rejection after endEncoding");}
