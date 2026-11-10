@@ -53,6 +53,11 @@ public:
   auto *dst=static_cast<uint8_t *>(contents(blocks[count-1]))+offset;
   memcpy(dst,bytes,n);memset(dst+n,0,((n+15)&~size_t(15))-n);used=offset+n;return {blocks[count-1],offset,n};
  }
+ // metal2vulkan accepts inline bytes only at offset 0: start a new block when the ring would align past zero.
+ template<class Allocate,class Contents> Slice copyOffsetZero(const void *bytes,size_t n,UploadStorage<Handle> &pool,Allocate allocate,Contents contents){
+  if(count && ((used+255)&~size_t(255)))used=UploadStorage<Handle>::blockBytes;
+  return copy(bytes,n,pool,allocate,contents);
+ }
  template<class Free> void release(UploadStorage<Handle> &pool,bool reusable,Free free){for(size_t i=0;i<count;++i){pool.release(blocks[i],reusable,free);blocks[i]={};}count=0;used=UploadStorage<Handle>::blockBytes;}
 };
 }
