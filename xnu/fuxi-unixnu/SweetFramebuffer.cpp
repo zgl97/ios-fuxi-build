@@ -211,8 +211,12 @@ public:
  /* Pacing window: both present paths run through scanoutLog(), so these
   * counters are the only figures comparable between the GPU and CPU paths.
   */
- uint64_t      fScanoutWinAbs, fScanoutLastAbs, fScanoutGapMax;
- uint32_t      fScanoutWinFrames, fScanoutOver8ms;
+ uint64_t      fScanoutWinAbs, fScanoutLastAbs, fScanoutGapMax, fScanoutMaxActive;
+ /* Gap buckets for presents that follow another within 50 ms: under the
+  * 8.33 ms deadline, then 8.33-16.7, 16.7-33.3, 33.3-50 ms. Anything slower
+  * is an idle screen, not a late frame, so it is counted separately.
+  */
+ uint32_t      fScanoutWinFrames, fScanoutIdle, fScanoutGapBins[4];
 #if defined(FUXI)
  bool          fVsyncTE, fTeValid, fTeSent;
  struct fg_te_observer fTe;
@@ -1694,8 +1698,15 @@ AppleCLCD::scanoutLog(bool gpu, uint64_t bytes, uint64_t copy, uint64_t prepare)
   uint64_t gapAbs = nowAbs - fScanoutLastAbs, gapNs = 0;
   absolutetime_to_nanoseconds(gapAbs, &gapNs);
   if (gapAbs > fScanoutGapMax) fScanoutGapMax = gapAbs;
-  /* 8.33 ms is the 120 Hz frame deadline this panel runs at. */
-  if (gapNs > 8333333ull) ++fScanoutOver8ms;
+  if (gapNs > 50000000ull) ++fScanoutIdle;
+  else {
+   if (gapAbs > fScanoutMaxActive) fScanoutMaxActive = gapAbs;
+   /* 8333333 ns is the 120 Hz deadline; the rest are 2x, 4x and 6x frames. */
+   if (gapNs <= 8333333ull) ++fScanoutGapBins[0];
+   else if (gapNs <= 16666667ull) ++fScanoutGapBins[1];
+   else if (gapNs <= 33333333ull) ++fScanoutGapBins[2];
+   else ++fScanoutGapBins[3];
+  }
  }
  fScanoutLastAbs = nowAbs;
  ++fScanoutWinFrames;
@@ -1705,16 +1716,21 @@ AppleCLCD::scanoutLog(bool gpu, uint64_t bytes, uint64_t copy, uint64_t prepare)
   IOLog("FUXI SCANOUT: frame=%u path=%s bytes=%llu copy_us=%llu prepare_us=%llu\n",
       fScanoutFrames, gpu ? "GPU" : "CPU", bytes, ns/1000, prep/1000);
  if (fScanoutFrames % 120 == 0) {
-  uint64_t winNs = 0, gapNs = 0;
+  uint64_t winNs = 0, gapNs = 0, activeNs = 0;
   absolutetime_to_nanoseconds(nowAbs - fScanoutWinAbs, &winNs);
   absolutetime_to_nanoseconds(fScanoutGapMax, &gapNs);
+  absolutetime_to_nanoseconds(fScanoutMaxActive, &activeNs);
   uint64_t fpsX100 = winNs ? (uint64_t)fScanoutWinFrames * 100000000000ULL / winNs : 0;
   IOLog("FUXI SCANOUT: summary frames=%u GPU=%u CPU=%u copy_avg_us=%llu copy_max_us=%llu deferred=%u "
-      "win_us=%llu win_frames=%u fps=%llu.%02llu max_gap_us=%llu over_8ms=%u\n",
+      "win_us=%llu win_frames=%u fps=%llu.%02llu max_gap_us=%llu idle=%u "
+      "gap_8330=%u gap_16700=%u gap_33300=%u gap_50000=%u max_active_gap_us=%llu\n",
       fScanoutFrames, fScanoutGpu, fScanoutCpu, fScanoutTime/1000/fScanoutFrames,
       fScanoutMax/1000, fScanoutDefers, winNs/1000, fScanoutWinFrames, fpsX100/100, fpsX100%100,
-      gapNs/1000, fScanoutOver8ms);
-  fScanoutWinAbs = nowAbs; fScanoutWinFrames = 0; fScanoutGapMax = 0; fScanoutOver8ms = 0;
+      gapNs/1000, fScanoutIdle, fScanoutGapBins[0], fScanoutGapBins[1], fScanoutGapBins[2],
+      fScanoutGapBins[3], activeNs/1000);
+  fScanoutWinAbs = nowAbs; fScanoutWinFrames = 0; fScanoutGapMax = 0; fScanoutIdle = 0;
+  fScanoutMaxActive = 0;
+  fScanoutGapBins[0] = fScanoutGapBins[1] = fScanoutGapBins[2] = fScanoutGapBins[3] = 0;
  }
 #else
  (void)gpu; (void)bytes; (void)copy; (void)prepare;
