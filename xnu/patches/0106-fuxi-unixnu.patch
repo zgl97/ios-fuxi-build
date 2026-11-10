@@ -447,7 +447,7 @@
  #define SWEET_FB_NOTIFY_TYPES           8
  #define SWEET_FB_NOTIFY_VSYNC           5
  #define SWEET_FB_VSYNC_US               16667
-@@ -127,25 +149,213 @@
+@@ -127,25 +149,214 @@
  	OSArray      *fClients;
  	uint32_t      fSwapID;
  	bool          fConsolePaused;
@@ -516,6 +516,7 @@
 +  * counters are the only figures comparable between the GPU and CPU paths.
 +  */
 + uint64_t      fScanoutWinAbs, fScanoutLastAbs, fScanoutGapMax, fScanoutMaxActive;
++ uint64_t      fScanoutActiveNs;
 + /* Gap buckets for presents that follow another within 50 ms: under the
 +  * 8.33 ms deadline, then 8.33-16.7, 16.7-33.3, 33.3-50 ms. Anything slower
 +  * is an idle screen, not a late frame, so it is counted separately.
@@ -665,7 +666,7 @@
  };
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
-@@ -174,6 +384,163 @@
+@@ -174,6 +385,163 @@
  OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
  #if defined(FUXI)
  extern "C" void fuxi_display_kick(void);
@@ -829,7 +830,7 @@
  #endif
  
  bool
-@@ -214,7 +581,33 @@
+@@ -214,7 +582,33 @@
  		OSSafeReleaseNULL(fWorkLoop);
  		return false;
  	}
@@ -864,7 +865,7 @@
  	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
  		IOLog("SWEET FB: no vsync timer\n");
  		return false;
-@@ -227,11 +620,20 @@
+@@ -227,11 +621,20 @@
  	PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
  	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
  #if defined(FUXI)
@@ -887,7 +888,7 @@
  #else
  	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
  #endif
-@@ -239,28 +641,150 @@
+@@ -239,28 +642,150 @@
  	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
@@ -1044,7 +1045,7 @@
  #else
  	(void)fb;
  	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
-@@ -272,44 +796,34 @@
+@@ -272,44 +797,34 @@
  {
  	AppleCLCD *fb = (AppleCLCD *)owner;
  	uint64_t now = mach_absolute_time();
@@ -1107,7 +1108,7 @@
  	if (fb->fPowerOff) {
  		/* Fade out: halve every channel each vsync, then black, then idle. */
  		uint32_t step = fb->fFadeStep;
-@@ -319,14 +833,22 @@
+@@ -319,14 +834,22 @@
  		IOLockUnlock(fb->fLock);
  #if defined(FUXI)
  		if (step == 0) {
@@ -1135,7 +1136,7 @@
  		}
  #else
  		if (step <= 6) {
-@@ -341,20 +863,13 @@
+@@ -341,20 +864,13 @@
  		sweet_fb_rearm(fb, sender);
  		return;
  	}
@@ -1163,7 +1164,7 @@
  	sweet_fb_rearm(fb, sender);
  }
  
-@@ -388,38 +903,356 @@
+@@ -388,38 +904,356 @@
  static uint32_t sweet_fb_swaps_logged;
  static uint64_t sweet_fb_swap_count;
  
@@ -1546,7 +1547,7 @@
  
  	if (!fConsolePaused) {
  		int quiet = 0;
-@@ -442,7 +1275,7 @@
+@@ -442,7 +1276,7 @@
  		if (!(mask & (1u << layer)) || id == 0) {
  			continue;
  		}
@@ -1555,7 +1556,7 @@
  		if (sweet_fb_swaps_logged < 16) {
  			sweet_fb_swaps_logged++;
  			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
-@@ -451,6 +1284,7 @@
+@@ -451,6 +1285,7 @@
  			    get32(a, 12), dx, dy, w, h);
  		}
  		if (s == NULL || s == fSurface) {
@@ -1563,7 +1564,7 @@
  			OSSafeReleaseNULL(s);
  			continue;
  		}
-@@ -500,35 +1334,262 @@
+@@ -500,35 +1335,262 @@
  		if (src != 0 && bpe == 4) {
  			int copied = 0;
  #if defined(FUXI)
@@ -1834,7 +1835,7 @@
  	fStatCopy += took;
  	fStatCopyMax = took > fStatCopyMax ? took : fStatCopyMax;
  	if (++fStatFrames >= 600) {
-@@ -538,15 +1599,47 @@
+@@ -538,15 +1600,47 @@
  		absolutetime_to_nanoseconds(t1 - fStatStart, &span_ns);
  		IOLockLock(fLock);
  		uint32_t swaps = fStatSwaps, dropped = fStatDropped;
@@ -1885,7 +1886,7 @@
  		sweet_surface_gpu_stats(&split);
  		uint64_t ticks[] = {split.pin, split.lookup, split.map, split.clean,
  		    split.submit, split.wait, split.unmap, split.cpu};
-@@ -557,13 +1650,21 @@
+@@ -557,13 +1651,21 @@
  			absolutetime_to_nanoseconds(ticks[i], &ns);
  			us[i] = attempts ? ns / 1000 / attempts : 0;
  		}
@@ -1910,7 +1911,7 @@
  		fGpuBusyTicks = fGpuFailed = 0;
  		fGpuFrames = fCpuFrames = 0;
  		fGpuTime = fCpuTime = 0;
-@@ -571,6 +1672,68 @@
+@@ -571,6 +1673,74 @@
  		fStatCopy = fStatCopyMax = 0;
  		fStatStart = t1;
  	}
@@ -1943,6 +1944,7 @@
 +  if (gapNs > 50000000ull) ++fScanoutIdle;
 +  else {
 +   if (gapAbs > fScanoutMaxActive) fScanoutMaxActive = gapAbs;
++   fScanoutActiveNs += gapNs;
 +   /* 8333333 ns is the 120 Hz deadline; the rest are 2x, 4x and 6x frames. */
 +   if (gapNs <= 8333333ull) ++fScanoutGapBins[0];
 +   else if (gapNs <= 16666667ull) ++fScanoutGapBins[1];
@@ -1963,15 +1965,20 @@
 +  absolutetime_to_nanoseconds(fScanoutGapMax, &gapNs);
 +  absolutetime_to_nanoseconds(fScanoutMaxActive, &activeNs);
 +  uint64_t fpsX100 = winNs ? (uint64_t)fScanoutWinFrames * 100000000000ULL / winNs : 0;
++  uint64_t activeFrames = (uint64_t)fScanoutGapBins[0] + fScanoutGapBins[1] +
++      fScanoutGapBins[2] + fScanoutGapBins[3];
++  uint64_t activeFpsX100 = fScanoutActiveNs ? activeFrames * 100000000000ULL / fScanoutActiveNs : 0;
 +  IOLog("FUXI SCANOUT: summary frames=%u GPU=%u CPU=%u copy_avg_us=%llu copy_max_us=%llu deferred=%u "
 +      "win_us=%llu win_frames=%u fps=%llu.%02llu max_gap_us=%llu idle=%u "
-+      "gap_8330=%u gap_16700=%u gap_33300=%u gap_50000=%u max_active_gap_us=%llu\n",
++      "gap_8330=%u gap_16700=%u gap_33300=%u gap_50000=%u max_active_gap_us=%llu "
++      "active_ms=%llu active_fps=%llu.%02llu\n",
 +      fScanoutFrames, fScanoutGpu, fScanoutCpu, fScanoutTime/1000/fScanoutFrames,
 +      fScanoutMax/1000, fScanoutDefers, winNs/1000, fScanoutWinFrames, fpsX100/100, fpsX100%100,
 +      gapNs/1000, fScanoutIdle, fScanoutGapBins[0], fScanoutGapBins[1], fScanoutGapBins[2],
-+      fScanoutGapBins[3], activeNs/1000);
++      fScanoutGapBins[3], activeNs/1000, fScanoutActiveNs/1000000, activeFpsX100/100,
++      activeFpsX100%100);
 +  fScanoutWinAbs = nowAbs; fScanoutWinFrames = 0; fScanoutGapMax = 0; fScanoutIdle = 0;
-+  fScanoutMaxActive = 0;
++  fScanoutMaxActive = 0; fScanoutActiveNs = 0;
 +  fScanoutGapBins[0] = fScanoutGapBins[1] = fScanoutGapBins[2] = fScanoutGapBins[3] = 0;
 + }
 +#else
@@ -1979,7 +1986,7 @@
  #endif
  }
  
-@@ -620,6 +1783,7 @@
+@@ -620,6 +1790,7 @@
  	IOLockLock(fFB->fLock);
  	old = fPort;
  	fPort = port;
@@ -1987,7 +1994,7 @@
  	IOLockUnlock(fFB->fLock);
  	if (old != MACH_PORT_NULL) {
  		releaseNotificationPort(old);
-@@ -643,6 +1807,40 @@
+@@ -643,6 +1814,40 @@
  }
  
  static uint64_t sweet_fb_logged;        /* selectors already logged (< 64) */
@@ -2028,7 +2035,7 @@
  
  IOReturn
  IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
-@@ -660,7 +1858,7 @@
+@@ -660,7 +1865,7 @@
  		break;
  	case kSweetFBSwapBegin:
  		IOLockLock(fFB->fLock);
@@ -2037,7 +2044,7 @@
  		IOLockUnlock(fFB->fLock);
  		outCount = 1;
  		break;
-@@ -672,7 +1870,7 @@
+@@ -672,7 +1877,7 @@
  			break;
  		}
  		memcpy(rec, args->structureInput, sizeof(rec));
@@ -2046,7 +2053,7 @@
  		break;
  	}
  	case kSweetFBGetID:
-@@ -698,6 +1896,7 @@
+@@ -698,6 +1903,7 @@
  			IOLockLock(fFB->fLock);
  			fFunc[type] = args->scalarInput[0];
  			fRefcon[type] = args->scalarInput[1];
@@ -2054,7 +2061,7 @@
  			IOLockUnlock(fFB->fLock);
  			char name[32];
  			proc_selfname(name, sizeof(name));
-@@ -707,19 +1906,13 @@
+@@ -707,19 +1913,13 @@
  		break;
  	case kSweetFBRequestPowerChange:
  		if (args->scalarInputCount >= 1) {
