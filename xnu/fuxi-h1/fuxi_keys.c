@@ -1887,6 +1887,19 @@ fw_pcie_up(void)
 	}
 	c = (volatile uint32_t *)base;
 	printf("FUXI WIFI: stage 4 endpoint id %#x class %#x\n", c[0], c[0x8 / 4]);
+	/* Cheap decisive probe: does a configuration cycle work while the link is
+	 * healthy?  If this hangs, the config window itself is wrong and no amount
+	 * of endpoint recovery can help. */
+	{
+		volatile uint32_t *cfgp =
+		    (volatile uint32_t *)ml_io_map(FW_CFG_WIN, 0x100000u);
+		printf("FUXI CFG: probe\n");
+		if (cfgp)
+			printf("FUXI CFG: id %#x cmd %#x bar0 %#x bar1 %#x\n",
+			    cfgp[0], cfgp[0x04 / 4], cfgp[0x10 / 4], cfgp[0x14 / 4]);
+		printf("FUXI CFG: probe done\n");
+	}
+
 	if (fw_stage >= 5) {
 		fw_mhi_probe(a, c, d);
 		if (fw_stage >= 8) {
