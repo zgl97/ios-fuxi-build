@@ -1898,6 +1898,21 @@ fw_pcie_up(void)
 			printf("FUXI CFG: id %#x cmd %#x bar0 %#x bar1 %#x\n",
 			    cfgp[0], cfgp[0x04 / 4], cfgp[0x10 / 4], cfgp[0x14 / 4]);
 		printf("FUXI CFG: probe done\n");
+	/* Read-only hunt for the real context-bank window: SMMU-500 implementations
+	 * differ between 0x1000*n and 0x8000+0x1000*n layouts. */
+	{
+		volatile uint32_t *sm =
+		    (volatile uint32_t *)ml_io_map(FW_SMMU, 0x20000u);
+		uint32_t page;
+
+		for (page = 1; page <= 0xc; page++) {
+			volatile uint32_t *cbp = sm + (page * 0x1000u) / 4u;
+			printf("FUXI CBHUNT: page %#x w0 %#x w20 %#x w28 %#x w30 %#x\n",
+			    page * 0x1000u, cbp[0], cbp[0x20 / 4], cbp[0x28 / 4],
+			    cbp[0x30 / 4]);
+		}
+	}
+
 	}
 
 	if (fw_stage >= 5) {
