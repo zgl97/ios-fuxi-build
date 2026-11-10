@@ -1978,7 +1978,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	kern_return_t kr;
 	uint64_t pa = 0;
 	unsigned low_dma = 0;
-	uint32_t span, bhioff, size, status = 0, i;
+	uint32_t span, bhioff, size, status = 0, i, sbl;
 	char fwname[32];
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 	strlcpy(fwname, "amss.bin", sizeof(fwname));
@@ -2040,7 +2040,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	printf("FUXI MHI: bhi version %u.%u\n", bhi[0x00 / 4], bhi[0x04 / 4]);
 	printf("FUXI MHI: writing bhi status\n");
 	bhi[0x2c / 4] = 0;
-	bhi[0x20 / 4] = 1;            /* BHI INT VEC: the MSI vector the PBL raises */
+	bhi[0x20 / 4] = 0;            /* BHI INT VEC: sheng passes 0 */
 	delay(20000);
 	pa = kvtophys(win);
 	printf("FUXI MHI: dma pa %#llx fw size %u\n", (unsigned long long)pa, size);
@@ -2065,10 +2065,12 @@ fw_bhi_boot(volatile uint32_t *m)
 	}
 	bhi[0x0c / 4] = 0;
 	bhi[0x08 / 4] = fw_smmu_win ? fw_bhi_addr : FW_DMA_PCI;
-	bhi[0x10 / 4] = (uint32_t)((size + 0xfffu) & ~0xfffu);
+	/* sheng WifiProbe: the PBL takes the first 512 KiB of amss.bin as the SBL */
+	sbl = size < FW_SBL ? size : FW_SBL;
+	bhi[0x10 / 4] = (sbl + 0xfffu) & ~0xfffu;
 	printf("FUXI MHI: writing doorbell\n");
 	delay(20000);
-	bhi[0x18 / 4] = 1;
+	bhi[0x18 / 4] = 0x5eedu;
 	printf("FUXI MHI: bhi armed file %s addr %#x size %#x\n", path, bhi[0x08 / 4], bhi[0x10 / 4]);
 	for (i = 0; i < 1000; i++) {
 		status = bhi[0x2c / 4];
