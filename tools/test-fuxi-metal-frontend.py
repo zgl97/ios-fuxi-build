@@ -212,7 +212,7 @@ def main():
         for stage in range(4):
             out=run(str(stage).encode());assert 'stage %u '%stage in out and 'done PASS' in out
             assert 'stage %u '%(stage+1) not in out
-        for bad in (b'',b'10',b'-1',b'1junk',b'3\0',b'1'*32):assert 'stage 0 discovery FAIL' in run(bad,1)
+        for bad in (b'',b'11',b'-1',b'1junk',b'3\0',b'1'*32):assert 'stage 0 discovery FAIL' in run(bad,1)
         out=run(b'4')
         assert 'stage 4 pipeline FAIL' in out and 'stage 4 pipeline SKIP after failure' in out,out
         assert 'done PASS' in out,out
