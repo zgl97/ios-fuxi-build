@@ -2078,6 +2078,7 @@ fw_bhi_boot(volatile uint32_t *m)
 	uint64_t pa = 0;
 	unsigned low_dma = 0;
 	uint32_t span, bhioff, size, status = 0, i, sbl, fixed = 0;
+	volatile uint32_t *cfg;
 	char fwname[32];
 	const char *path = "/private/var/ngpu/firmware/ath12k/WCN7850/hw2.0/amss.bin";
 	strlcpy(fwname, "amss.bin", sizeof(fwname));
@@ -2171,18 +2172,27 @@ fw_bhi_boot(volatile uint32_t *m)
 	delay(20000);
 	bhi[0x18 / 4] = 0x5eedu;
 	printf("FUXI MHI: bhi armed file %s addr %#x size %#x\n", path, bhi[0x08 / 4], bhi[0x10 / 4]);
+	cfg = (volatile uint32_t *)ml_io_map(FW_CFG_WIN, 0x100000u);
 	for (i = 0; i < 1000; i++) {
+		uint32_t vid = cfg ? cfg[0] : 0;
+
+		/* Only touch the BAR window while the endpoint still answers configuration
+		 * cycles: a memory read to a vanished endpoint aborts the whole SoC. */
+		if (cfg == 0 || vid == 0xffffffffu || (vid & 0xffffu) != 0x17cbu) {
+			if (cfg)
+				fixed = fw_link_recover(cfg, fw_bar0_saved, fw_cmd_saved);
+			if (i < 3 || (i % 100) == 0)
+				printf("FUXI MHI: poll %u link down vid %#x fixed %#x\n",
+				    i, vid, fixed);
+			delay(10000);
+			continue;
+		}
 		status = bhi[0x2c / 4];
 		/* 0xffffffff is the PBL still working, not an error (sheng MhiBoot.c:94) */
 		if (status == 0xffffffffu) {
-			if (!fixed && fw_bar0_saved) {
-				volatile uint32_t *cfg =
-				    (volatile uint32_t *)ml_io_map(FW_CFG_WIN, 0x100000u);
-				fixed = fw_link_recover(cfg, fw_bar0_saved, fw_cmd_saved);
-				if (fixed)
-					printf("FUXI MHI: link recovered %#x bar %#x cmd %#x\n",
-					    fixed, cfg[0x10 / 4], cfg[0x04 / 4]);
-			}
+			if (cfg)
+				printf("FUXI MHI: poll %u device busy, bar %#x cmd %#x\n",
+				    i, cfg[0x10 / 4], cfg[0x04 / 4]);
 			delay(10000);
 			continue;
 		}
