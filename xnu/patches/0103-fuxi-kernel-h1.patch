@@ -798,7 +798,7 @@
  }
  
  void
-@@ -289,5 +852,1472 @@
+@@ -289,5 +852,1468 @@
  	} else {
  		printf("FUXI KEYS: kernel_thread_start failed\n");
  	}
@@ -1580,14 +1580,10 @@
 +				    (FW_IOVA >> 21) & 0x1ffu,
 +				    (unsigned long long)t2[(FW_IOVA >> 21) & 0x1ffu],
 +				    (unsigned long long)dpa);
-+				m[0x1000 / 4] = 0;
-+				m[0x1020 / 4] = (uint32_t)p1;
-+				m[0x1024 / 4] = (uint32_t)(p1 >> 32);
-+				m[0x1030 / 4] = 32u;
-+				m[0x2008 / 4] = 0;
-+				m[0x200c / 4] = 0;
-+				__asm__ volatile("dsb sy" ::: "memory");
-+				m[0x1000 / 4] = 0x141u;
++				/* Programming CB0 here aborts the bus on the first write, so
++				 * this pass only reads it back: the loader tries the write. */
++				printf("FUXI SMMU: cb0 readback sctlr %#x ttbr0 %#x:%#x tcr %#x\n",
++				    m[0x1000 / 4], m[0x1024 / 4], m[0x1020 / 4], m[0x1030 / 4]);
 +				__asm__ volatile("dsb sy" ::: "memory");
 +				m[0x820 / 4] = 0x80000000u | 0x1400u;
 +				m[0x824 / 4] = 0x80000000u | 0x1401u;
