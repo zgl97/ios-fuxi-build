@@ -38,7 +38,7 @@ int main(){@autoreleasepool{
  auto firstBinding=inlineCommand->_ops[0].buffers[0][0],nextBinding=inlineCommand->_ops[1].buffers[0][0];
  assert(firstBinding.buffer->upload && nextBinding.buffer->upload && firstBinding.buffer!=nextBinding.buffer && firstBinding.offset==0 && nextBinding.offset==0 && firstBinding.length()==37 && nextBinding.length()==128);
  assert(((uint8_t *)firstBinding.buffer->contents)[0]==0x43 && !((uint8_t *)firstBinding.buffer->contents)[37] && ((uint8_t *)nextBinding.buffer->contents)[0]==0x65 && !((uint8_t *)nextBinding.buffer->contents)[128]);
- auto uploadBuffer=firstBinding.buffer;unsigned inlineDraws=0;fuxi::Backend::modelDraw=[&](const fuxi::Operation &op){auto b=op.buffers[0][0];assert(b.bytes && b.length()-b.offset==(inlineDraws?128:37));++inlineDraws;};
+ unsigned inlineDraws=0;fuxi::Backend::modelDraw=[&](const fuxi::Operation &op){auto b=op.buffers[0][0];assert(b.bytes && b.length()-b.offset==(inlineDraws?128:37));++inlineDraws;};
  [inlineCommand commit];assert(!inlineCommand.error && inlineDraws==2);
  FuxiCommandBuffer *reused=(FuxiCommandBuffer *)[queue commandBuffer];FuxiRender *reusedRender=(FuxiRender *)[reused renderCommandEncoderWithDescriptor:pass];
  [reusedRender setVertexBytes:nextBytes length:sizeof(nextBytes) atIndex:0];auto reusedBinding=reusedRender->_state.buffers[0][0];assert(reusedBinding.buffer && reusedBinding.buffer->upload && reusedBinding.bytes && reusedBinding.offset==0 && ((const uint8_t *)reusedBinding.buffer->contents)[0]==0x65);[reusedRender endEncoding];[reused commit];assert(!reused.error);
