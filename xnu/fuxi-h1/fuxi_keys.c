@@ -1598,10 +1598,17 @@ fw_smmu_dump(void)
 		printf("FUXI SMMU: dma2 %d %#lx\n", kr, (unsigned long)dma2);
 		if (kr == KERN_SUCCESS && dma2) {
 			uint64_t *t1, *t2, dpa, p1, p2;
-			kr = kmem_alloc_contig(kernel_map, &l1, 0x1000, 0xfffu, 1, 0, KMA_ZERO,
-			    VM_KERN_MEMORY_BSD);
-			kr |= kmem_alloc_contig(kernel_map, &l2, 0x1000, 0xfffu, 1, 0, KMA_ZERO,
-			    VM_KERN_MEMORY_BSD);
+			kr = KERN_SUCCESS;
+			l1 = 0;
+			l2 = 0;
+			if (kmem_alloc(kernel_map, &l1, 0x1000, KMA_ZERO, VM_KERN_MEMORY_BSD) !=
+			    KERN_SUCCESS || kmem_alloc(kernel_map, &l2, 0x1000, KMA_ZERO,
+			    VM_KERN_MEMORY_BSD) != KERN_SUCCESS)
+				kr = KERN_NO_SPACE;
+			if (l1 && l2) {
+				bzero((void *)l1, 0x1000);
+				bzero((void *)l2, 0x1000);
+			}
 			printf("FUXI SMMU: tables %d l1 %#lx l2 %#lx\n", kr,
 			    (unsigned long)l1, (unsigned long)l2);
 			if (kr == KERN_SUCCESS && l1 && l2) {
