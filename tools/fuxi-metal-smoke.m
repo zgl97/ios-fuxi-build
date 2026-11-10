@@ -49,8 +49,11 @@ static unsigned configuration(void) {
  char raw[32];size_t n=fread(raw,1,sizeof(raw),f);BOOL bad=ferror(f);fclose(f);
  if(bad || n==sizeof(raw))fail("config read/length");
  size_t i=0;while(i<n && strchr(" \t\r\n",raw[i]) && raw[i])++i;
- if(i==n || raw[i]<'0' || raw[i]>'9')fail("config expected max stage 0..9");
- unsigned result=(unsigned)(raw[i++]-'0');while(i<n && raw[i] && strchr(" \t\r\n",raw[i]))++i;
+ if(i==n || raw[i]<'0' || raw[i]>'9')fail("config expected max stage 0..10");
+ unsigned result=(unsigned)(raw[i++]-'0');
+ if(i<n && raw[i]>='0' && raw[i]<='9')result=result*10u+(unsigned)(raw[i++]-'0');
+ if(result>10u)fail("config max stage %u out of range",result);
+ while(i<n && raw[i] && strchr(" \t\r\n",raw[i]))++i;
  if(i!=n)fail("config trailing data");return result;
 }
 static void verify(id<MTLBuffer>b,NSUInteger begin,NSUInteger size,uint8_t value) {
@@ -291,6 +294,29 @@ static void mips(id<MTLDevice>device,id<MTLCommandQueue>q) {
  [target release];[view release];[readback release];[source release];
  puts("FUXI MTL: stage 7 mips PASS generateMipmaps 64x64 -> level 2 (16x16) copy 256 texels + level 2 view sampled 256 texels");
 }
+// M9 device coverage: the ten-level chain CA asks for, generated and read at the tail.
+static void mipchain(id<MTLDevice>device,id<MTLCommandQueue>q) {
+ MTLTextureDescriptor *td=[MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatBGRA8Unorm width:512 height:512 mipmapped:YES];
+ td.storageMode=MTLStorageModeShared;td.usage=MTLTextureUsageShaderRead|MTLTextureUsageRenderTarget;
+ id<MTLTexture>source=[device newTextureWithDescriptor:td];if(!source)fail("mipchain source allocation");
+ if(source.mipmapLevelCount!=10)fail("mipchain level count %lu",(unsigned long)source.mipmapLevelCount);
+ static const uint8_t want[4]={0x51,0x62,0x73,0xff};
+ uint8_t *base=(uint8_t *)malloc(512*512*4);if(!base)fail("mipchain base allocation");
+ for(size_t i=0;i<512*512*4;i+=4)memcpy(base+i,want,4);
+ [source replaceRegion:MTLRegionMake2D(0,0,512,512) mipmapLevel:0 withBytes:base bytesPerRow:2048];free(base);
+ id<MTLCommandBuffer>command=q.commandBuffer;id<MTLBlitCommandEncoder>b=command.blitCommandEncoder;
+ if(!b)fail("mipchain blit encoder");[b generateMipmapsForTexture:source];[b endEncoding];finish(command);
+ id<MTLBuffer>readback=[device newBufferWithLength:768 options:MTLResourceStorageModeShared];
+ if(!readback)fail("mipchain readback allocation");memset(readback.contents,0x39,readback.length);
+ command=q.commandBuffer;b=command.blitCommandEncoder;if(!b)fail("mipchain tail encoder");
+ [b copyFromTexture:source sourceSlice:0 sourceLevel:9 sourceOrigin:MTLOriginMake(0,0,0) sourceSize:MTLSizeMake(1,1,1)
+  toBuffer:readback destinationOffset:256 destinationBytesPerRow:4 destinationBytesPerImage:4];[b endEncoding];finish(command);
+ verify(readback,0,256,0x39);verify(readback,260,768-260,0x39);
+ const uint8_t *tail=(const uint8_t *)readback.contents+256;
+ if(memcmp(tail,want,4))fail("mipchain level 9 texel %02x%02x%02x%02x",tail[0],tail[1],tail[2],tail[3]);
+ [readback release];[source release];
+ puts("FUXI MTL: stage 10 mipchain PASS 512x512 mipmapped gives 10 levels, generateMipmaps, level 9 (1x1) copied");
+}
 // M9 device coverage: three color targets carrying different formats at once.
 static void mrt(id<MTLDevice>device,id<MTLCommandQueue>q) {
  const MTLPixelFormat formats[3]={MTLPixelFormatBGRA8Unorm,MTLPixelFormatRGBA16Float,MTLPixelFormatRGBA8Unorm};
@@ -434,6 +460,7 @@ int main(int argc,char **argv) {
    if(maximum>=7) {STAGE(7,"mips",mips(device,q));printf("FUXI MTL: stage 7 footprint %llu KiB\n",footprint());}
    if(maximum>=8) {STAGE(8,"mrt",mrt(device,q));printf("FUXI MTL: stage 8 footprint %llu KiB\n",footprint());}
    if(maximum>=9) {STAGE(9,"volume",volume(device,q));printf("FUXI MTL: stage 9 footprint %llu KiB\n",footprint());}
+ if(maximum>=10) {STAGE(10,"mipchain",mipchain(device,q));printf("FUXI MTL: stage 10 footprint %llu KiB\n",footprint());}
    arm(10);[a release];[q release];
   }
   [device release];alarm(0);puts("FUXI MTL: done PASS");
