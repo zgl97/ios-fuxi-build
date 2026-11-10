@@ -6,6 +6,7 @@
 #include <errno.h>
 #include "fuxi-metal/M7Reference.h"
 #include <signal.h>
+#include <setjmp.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,8 +37,15 @@ static void expired(int sig) {(void)sig;(void)write(1,timeoutLine,timeoutLength)
 static void arm(unsigned seconds) {
  alarm(0);timeoutLength=(size_t)snprintf(timeoutLine,sizeof(timeoutLine),"FUXI MTL: stage %u %s FAIL exceeded %u s wall bound\n",stage,name,seconds);alarm(seconds);
 }
+static sigjmp_buf stageJump;static int stageArmed;
 __attribute__((noreturn)) static void fail(const char *fmt,...) {
- printf("FUXI MTL: stage %u %s FAIL ",stage,name);va_list a;va_start(a,fmt);vprintf(fmt,a);va_end(a);putchar('\n');_exit(1);
+ char msg[192];va_list a;va_start(a,fmt);vsnprintf(msg,sizeof(msg),fmt,a);va_end(a);
+ printf("FUXI MTL: stage %u %s FAIL %s
+",stage,name,msg);
+ if(stageArmed)siglongjmp(stageJump,1);_exit(1);
+}
+#define STAGE(n,nm,body) do{stage=n;name=nm;arm(60);if(sigsetjmp(stageJump,1)==0){stageArmed=1;@autoreleasepool{body;}stageArmed=0;}else{stageArmed=0;printf("FUXI MTL: stage %u %s SKIP after failure
+",stage,name);}}while(0)
 }
 static unsigned configuration(void) {
  FILE *f=fopen(FUXI_MTL_CONF,"rb");if(!f){if(errno==ENOENT)return 3;fail("config unreadable");}
@@ -420,12 +428,12 @@ int main(int argc,char **argv) {
     }
     [b release];
    }
-   if(maximum>=4) {stage=4;name="pipeline";arm(60);@autoreleasepool {pipeline(device,q);}printf("FUXI MTL: stage 4 footprint %llu KiB\n",footprint());}
-   if(maximum>=5) {stage=5;name="composition";arm(60);@autoreleasepool {composition(device,q);}printf("FUXI MTL: stage 5 footprint %llu KiB\n",footprint());}
-   if(maximum>=6) {stage=6;name="layers";arm(60);@autoreleasepool {layers(device,q);}printf("FUXI MTL: stage 6 footprint %llu KiB\n",footprint());}
-   if(maximum>=7) {stage=7;name="mips";arm(60);@autoreleasepool {mips(device,q);}printf("FUXI MTL: stage 7 footprint %llu KiB\n",footprint());}
-   if(maximum>=8) {stage=8;name="mrt";arm(60);@autoreleasepool {mrt(device,q);}printf("FUXI MTL: stage 8 footprint %llu KiB\n",footprint());}
-   if(maximum>=9) {stage=9;name="volume";arm(60);@autoreleasepool {volume(device,q);}printf("FUXI MTL: stage 9 footprint %llu KiB\n",footprint());}
+   if(maximum>=4) {STAGE(4,"pipeline",pipeline(device,q));printf("FUXI MTL: stage 4 footprint %llu KiB\n",footprint());}
+   if(maximum>=5) {STAGE(5,"composition",composition(device,q));printf("FUXI MTL: stage 5 footprint %llu KiB\n",footprint());}
+   if(maximum>=6) {STAGE(6,"layers",layers(device,q));printf("FUXI MTL: stage 6 footprint %llu KiB\n",footprint());}
+   if(maximum>=7) {STAGE(7,"mips",mips(device,q));printf("FUXI MTL: stage 7 footprint %llu KiB\n",footprint());}
+   if(maximum>=8) {STAGE(8,"mrt",mrt(device,q));printf("FUXI MTL: stage 8 footprint %llu KiB\n",footprint());}
+   if(maximum>=9) {STAGE(9,"volume",volume(device,q));printf("FUXI MTL: stage 9 footprint %llu KiB\n",footprint());}
    arm(10);[a release];[q release];
   }
   [device release];alarm(0);puts("FUXI MTL: done PASS");
