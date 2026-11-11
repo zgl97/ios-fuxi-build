@@ -606,10 +606,16 @@ fk_taps(void *arg, wait_result_t wr)
 	(void)PE_parse_boot_argn("fuxitapsloop", &loops, sizeof(loops));
 	if (loops < 1) {
 		loops = 1;
-	} else if (loops > 20) {
-		loops = 20;
+	} else if (loops > 200) {
+		loops = 200;
 	}
 	printf("FUXI TAPS: starts in %u s, %u loops: %s\n", delay, loops, cmds);
+	/* fuxitapgap=<ms>: pause after each tap/swipe/key so a script can run back to back. */
+	unsigned gap = 1200;
+	(void)PE_parse_boot_argn("fuxitapgap", &gap, sizeof(gap));
+	if (gap > 60000) {
+		gap = 60000;
+	}
 	fk_script_sleep(delay * 1000u);
 	for (unsigned pass = 0; pass < loops; pass++) {
 	if (loops > 1) {
@@ -637,14 +643,14 @@ fk_taps(void *arg, wait_result_t wr)
 			sweet_hid_touch(0, 1, (int)v[0], (int)v[1]);
 			fk_script_sleep(80);
 			sweet_hid_touch(0, 0, (int)v[0], (int)v[1]);
-			fk_script_sleep(1200);
+			fk_script_sleep(gap);
 			printf("FUXI TOUR: shot %u step\n", ++shots);
 		} else if (op == 's' && n >= 4) {
 			printf("FUXI TAPS: swipe %ld,%ld -> %ld,%ld in %ld ms\n", v[0], v[1], v[2], v[3],
 			    n >= 5 ? v[4] : 250);
 			fk_swipe((int)v[0], (int)v[1], (int)v[2], (int)v[3],
 			    n >= 5 ? (unsigned)v[4] : 250u);
-			fk_script_sleep(1200);
+			fk_script_sleep(gap);
 			printf("FUXI TOUR: shot %u step\n", ++shots);
 		} else if (op == 'w' && n >= 1) {
 			printf("FUXI TAPS: wait %ld ms\n", v[0]);
@@ -659,7 +665,7 @@ fk_taps(void *arg, wait_result_t wr)
 			    v[0] == 0 ? "power" : v[0] == 1 ? "volume-up" :
 			    v[0] == 2 ? "volume-down" : "");
 			(void)fk_inject(&cmd);
-			fk_script_sleep(1200);
+			fk_script_sleep(gap);
 		} else {
 			printf("FUXI TAPS: bad command '%c' with %d numbers\n", op, n);
 		}
@@ -1632,15 +1638,6 @@ fw_smmu_dump(void)
 				    (unsigned long long)dpa);
 				/* Programming CB0 here aborts the bus on the first write, so
 				 * this pass only reads it back: the loader tries the write. */
-				printf("FUXI SMMU: alt probe begin\n");
-				printf("FUXI SMMU: alt 8000 %#x\n", m[0x8000 / 4]);
-				printf("FUXI SMMU: alt 10000 %#x\n", m[0x10000 / 4]);
-				{
-					volatile uint32_t *st =
-					    (volatile uint32_t *)ml_io_map(0x151fe000u, 0x1000u);
-					printf("FUXI SMMU: alt sec %#x %#x\n", st[0], st[1]);
-				}
-				printf("FUXI SMMU: alt probe done\n");
 				printf("FUXI SMMU: cb0 readback sctlr %#x ttbr0 %#x:%#x tcr %#x\n",
 				    m[0x1000 / 4], m[0x1024 / 4], m[0x1020 / 4], m[0x1030 / 4]);
 				__asm__ volatile("dsb sy" ::: "memory");
