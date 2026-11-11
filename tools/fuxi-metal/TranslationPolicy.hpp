@@ -61,6 +61,10 @@ inline TranslationPolicy systemTranslationPolicy() {
   // earlier-writer scans only when an earlier op writes a buffer, hoist reason strings only on submits that log them, one bulk read per index range,
   // rt-shadow and pass reorders applied in place). =2 also drops the CPU index scan of indexed draws when the device enforces robustBufferAccess.
   {const char *v=getenv("FUXI_MTL_SUBMIT_LEAN");p.submitLeanLevel=v && (!strcmp(v,"1") || !strcmp(v,"2"))?unsigned(v[0]-'0'):0;p.submitLean=p.submitLeanLevel!=0;fprintf(stderr,"FUXI MTL: policy submit_lean=%u\n",p.submitLeanLevel);}
+  {bool leanKey=false;unsigned lean=translationLevel(args,"fuxigpusubmitlean=",2);translationOption(args,"fuxigpusubmitlean=",&leanKey);
+   if(leanKey){p.submitLeanLevel=lean;p.submitLean=lean!=0;fprintf(stderr,"FUXI MTL: policy submit_lean=%u boot\n",lean);}
+   bool splitKey=false;bool split=translationOption(args,"fuxigpusplit=",&splitKey);if(splitKey){p.splitSubmit=split;fprintf(stderr,"FUXI MTL: policy split_submit=%d boot\n",int(split));}
+   bool bufKey=false;bool buf=translationOption(args,"fuxigpubufcached=",&bufKey);if(bufKey){p.bufferCached=buf;fprintf(stderr,"FUXI MTL: policy buffer_cached=%d boot\n",int(buf));}}
   // FUXI_MTL_SPLIT_SUBMIT=1: a submit with 2+ render passes is recorded into chunks; a chunk is queued at a pass end once its recording took
   // FUXI_MTL_SPLIT_SUBMIT_US (0..100000, default 400, 0 = every pass end), at most FUXI_MTL_SPLIT_SUBMIT_MAX (2..8, default 3: FuxiAdreno queue mode admits
   // 4 jobs in flight) chunks; only the last chunk signals the fence.
