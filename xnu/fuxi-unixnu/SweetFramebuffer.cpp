@@ -648,9 +648,13 @@ AppleCLCD::start(IOService *provider)
 	fBacklightPowerNotifications = backlight == 2 || backlight == 3;
 	fuxi_backlight_publish(this);
 	sweet_fb_refresh_publish(this);
- fSwapHist = sweet_fb_adt_u32(provider, "fuxi,swap-hist") == 1;
+ {
+  int scanhist = 0;
+  PE_parse_boot_argn("fuxiscanhist", &scanhist, sizeof(scanhist));
+  fSwapHist = scanhist == 1 || sweet_fb_adt_u32(provider, "fuxi,swap-hist") == 1;
+ }
  nanoseconds_to_absolutetime(100000000ULL, &fSwapIdle);
- if (fSwapHist) IOLog("SWEET FB: swap interval histogram on (fuxi,swap-hist)\n");
+ if (fSwapHist) IOLog("SWEET FB: swap interval histogram on (fuxi,swap-hist or fuxiscanhist)\n");
 #endif
 	registerService();
 	IOLog("SWEET FB: AppleCLCD %ux%u stride %u at 0x%llx, default surface %u, presented as %ux%u\n",
