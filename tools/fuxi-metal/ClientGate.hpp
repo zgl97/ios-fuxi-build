@@ -41,12 +41,15 @@ static inline bool clientName(const char *s) {
 // mediaserverd's CMCapture preloads AppleCVAPhoto's shader library (28 aborts
 // per boot) and SpringBoard's Siri orb prewarms its shaders (abort every
 // 8.3 s). A denied device init returns nil, which is what both expect here.
-static inline bool hiddenClient(const char *s) {
- return !strcmp(s,"SpringBoard") || !strcmp(s,"mediaserverd");
+// SpringBoard can be opted back in with fuxispringboard=1 for experiments.
+static inline bool hiddenClient(const char *s,const char *bootargs=nullptr) {
+ if(!strcmp(s,"mediaserverd"))return true;
+ if(!strcmp(s,"SpringBoard"))return !(bootargs && strstr(bootargs,"fuxispringboard=1"));
+ return false;
 }
 static inline ClientMode parseClients(char *data,size_t length,const char *process,const char *bootargs=nullptr) {
  bool backboard=!strcmp(process,"backboardd");
- if(hiddenClient(process) || (backboard && !backboardArmed(bootargs)))return ClientMode::deny;
+ if(hiddenClient(process,bootargs) || (backboard && !backboardArmed(bootargs)))return ClientMode::deny;
  if(!clientName(process)||memchr(data,0,length))return ClientMode::deny;
  data[length]=0;ClientMode result=ClientMode::deny;
  for(char *line=data;line;) {
