@@ -1105,6 +1105,9 @@ int fuxi_gpu_abi_unmap(uint64_t iova, uint64_t bytes)
 int fuxi_gpu_abi_submit(const uint64_t *iovas, const uint64_t *sizes,
     unsigned count, uint64_t *fence)
 {
+ static unsigned fg_abi_cpu_log;
+ if ((++fg_abi_cpu_log % 600u) == 0)
+  printf("FUXI GPU ABI: submit cpu=%u\n", ml_get_cpu_number_local());
  uint64_t t0=rsr("cntpct_el0");
  FG_GUARD;
  uint64_t t1=rsr("cntpct_el0");
