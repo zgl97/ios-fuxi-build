@@ -67,6 +67,7 @@ static inline ClientMode parseClients(char *data,size_t length,const char *proce
   }
   line=next;
  }
+ if(result==ClientMode::deny && !backboard && bootargs && strstr(bootargs,"fuxigpuall=1"))result=ClientMode::allow;
  return backboard && result!=ClientMode::allow?ClientMode::deny:result;
 }
 static inline ClientMode readClients(const char *path,const char *process) {
@@ -76,7 +77,7 @@ static inline ClientMode readClients(const char *path,const char *process) {
   ssize_t n;while(used<sizeof(data)-1 && (n=read(fd,data+used,sizeof(data)-1-used))>0)used+=(size_t)n;
   char tail;ok=read(fd,&tail,1)==0 && used==(size_t)st.st_size;
  }
- char args[4096]={};if(!strcmp(process,"backboardd"))systemString("kern.bootargs",args,sizeof(args));
+ char args[4096]={};systemString("kern.bootargs",args,sizeof(args));
  close(fd);return ok?parseClients(data,used,process,args):ClientMode::deny;
 }
 }
