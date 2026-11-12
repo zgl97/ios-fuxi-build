@@ -32,6 +32,7 @@ int main() {
  for(const char *config:{"mediaserverd\n","census mediaserverd\n","fuxi-ca-smoke\nmediaserverd\n"})
   for(const char *args:{(const char *)nullptr,armed,"fuxibbgpu=2"})assert(parse(config,"mediaserverd",args)==M::deny);
  assert(fuxi::hiddenClient("SpringBoard") && fuxi::hiddenClient("mediaserverd"));
+ assert(!fuxi::hiddenClient("SpringBoard","fuxispringboard=1") && fuxi::hiddenClient("mediaserverd","fuxispringboard=1"));
  assert(!fuxi::hiddenClient("mediaserverd2") && !fuxi::hiddenClient("backboardd") && !fuxi::hiddenClient("fuxi-ca-smoke"));
  assert(parse("fuxi-ca-smoke\nmediaserverd\n","fuxi-ca-smoke")==M::allow);
  assert(parse("# comment\n\tfuxi-metal-smoke \r\n")==M::allow);
