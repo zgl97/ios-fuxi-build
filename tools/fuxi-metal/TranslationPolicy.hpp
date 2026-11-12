@@ -51,7 +51,9 @@ inline TranslationPolicy systemTranslationPolicy() {
   {auto num=[](const char *key,unsigned lo,unsigned hi,unsigned &out){const char *v=getenv(key);if(v){long m=atol(v);if(m>=long(lo) && m<=long(hi))out=unsigned(m);}};
    const char *v=getenv("FUXI_MTL_DRAW_AREA");p.drawArea=v && !strcmp(v,"1");num("FUXI_MTL_DRAW_AREA_MIN_PX",1,1u<<26,p.drawAreaMinPx);num("FUXI_MTL_DRAW_AREA_MARGIN",0,256,p.drawAreaMargin);num("FUXI_MTL_DRAW_AREA_BUDGET_US",0,100000,p.drawAreaBudgetUs);
    fprintf(stderr,"FUXI MTL: policy draw_area=%d draw_area_min_px=%u draw_area_margin=%u draw_area_budget_us=%u\n",int(p.drawArea),p.drawAreaMinPx,p.drawAreaMargin,p.drawAreaBudgetUs);}
-  {const char *v=getenv("FUXI_MTL_EARLY_RELEASE");p.earlyRelease=v && !strcmp(v,"1");fprintf(stderr,"FUXI MTL: policy early_release=%d\n",int(p.earlyRelease));}
+  {const char *v=getenv("FUXI_MTL_EARLY_RELEASE");p.earlyRelease=v && !strcmp(v,"1");
+   bool erKey=false;bool er=translationOption(args,"fuxigpuearlyrelease=",&erKey);if(erKey){p.earlyRelease=er;fprintf(stderr,"FUXI MTL: policy early_release=%d boot\n",int(er));}
+   else fprintf(stderr,"FUXI MTL: policy early_release=%d\n",int(p.earlyRelease));}
   {const char *v=getenv("FUXI_MTL_HALF_ROUND");p.halfRound=v && v[0]>='1' && v[0]<='3' && !v[1]?unsigned(v[0]-'0'):0; // FUXI_MTL_HALF_ROUND_PIPES: comma-separated fh= hashes that may take a lossy mode (unset: all)
    v=getenv("FUXI_MTL_HALF_ROUND_PIPES");char list[16*9+1]="";p.halfPipesSet=v && *v;
    if(p.halfPipesSet)for(const char *q=v;*q && p.halfPipeCount<16;){char *end=nullptr;unsigned long h=strtoul(q,&end,16);if(end==q)break;p.halfPipes[p.halfPipeCount++]=uint32_t(h);q=end;while(*q==',' || *q==' ')++q;}
