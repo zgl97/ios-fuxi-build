@@ -64,13 +64,14 @@ inline TranslationPolicy systemTranslationPolicy() {
   {bool leanKey=false;unsigned lean=translationLevel(args,"fuxigpusubmitlean=",2);translationOption(args,"fuxigpusubmitlean=",&leanKey);
    if(leanKey){p.submitLeanLevel=lean;p.submitLean=lean!=0;fprintf(stderr,"FUXI MTL: policy submit_lean=%u boot\n",lean);}
    bool splitKey=false;bool split=translationOption(args,"fuxigpusplit=",&splitKey);if(splitKey){p.splitSubmit=split;fprintf(stderr,"FUXI MTL: policy split_submit=%d boot\n",int(split));}
-   bool bufKey=false;bool buf=translationOption(args,"fuxigpubufcached=",&bufKey);if(bufKey){p.bufferCached=buf;fprintf(stderr,"FUXI MTL: policy buffer_cached=%d boot\n",int(buf));}}
+   bool bufKey=false;bool buf=translationOption(args,"fuxigpubufcached=",&bufKey);if(bufKey){p.bufferCached=buf;fprintf(stderr,"FUXI MTL: policy buffer_cached=%d boot\n",int(buf));}
+   bool cpuKey=false;bool cpu=translationOption(args,"fuxigpuframecpu=",&cpuKey);if(cpuKey){p.frameCPU=cpu;fprintf(stderr,"FUXI MTL: policy frame_cpu=%d boot\n",int(cpu));}}
   // FUXI_MTL_SPLIT_SUBMIT=1: a submit with 2+ render passes is recorded into chunks; a chunk is queued at a pass end once its recording took
   // FUXI_MTL_SPLIT_SUBMIT_US (0..100000, default 400, 0 = every pass end), at most FUXI_MTL_SPLIT_SUBMIT_MAX (2..8, default 3: FuxiAdreno queue mode admits
   // 4 jobs in flight) chunks; only the last chunk signals the fence.
-  {const char *v=getenv("FUXI_MTL_SPLIT_SUBMIT");p.splitSubmit=v && !strcmp(v,"1");v=getenv("FUXI_MTL_SPLIT_SUBMIT_US");if(v){char *e=nullptr;long m=strtol(v,&e,10);if(e!=v && !*e && m>=0 && m<=100000)p.splitSubmitUs=unsigned(m);}
+  {const char *v=getenv("FUXI_MTL_SPLIT_SUBMIT");if(v)p.splitSubmit=!strcmp(v,"1");v=getenv("FUXI_MTL_SPLIT_SUBMIT_US");if(v){char *e=nullptr;long m=strtol(v,&e,10);if(e!=v && !*e && m>=0 && m<=100000)p.splitSubmitUs=unsigned(m);}
    v=getenv("FUXI_MTL_SPLIT_SUBMIT_MAX");if(v){char *e=nullptr;long m=strtol(v,&e,10);if(e!=v && !*e && m>=2 && m<=8)p.splitSubmitMax=unsigned(m);}
-   fprintf(stderr,"FUXI MTL: policy split_submit=%d split_submit_us=%u split_submit_max=%u\n",int(p.splitSubmit),p.splitSubmitUs,p.splitSubmitMax);}
+   if(v)fprintf(stderr,"FUXI MTL: policy split_submit=%d split_submit_us=%u split_submit_max=%u\n",int(p.splitSubmit),p.splitSubmitUs,p.splitSubmitMax);}
   // FUXI_MTL_FETCH_SPLIT=1: inside a pass with framebuffer-fetch draws only fetch pipelines carry the rasterization-order blend flag (Turnip: per-overlap
   // flush); a fetch draw that follows a non-fetch draw of the same pass first gets a by-region COLOR_ATTACHMENT_WRITE -> INPUT_ATTACHMENT_READ self-dependency barrier.
   {const char *v=getenv("FUXI_MTL_FETCH_SPLIT");p.fetchSplit=v && !strcmp(v,"1");fprintf(stderr,"FUXI MTL: policy fetch_split=%d\n",int(p.fetchSplit));}
@@ -78,7 +79,7 @@ inline TranslationPolicy systemTranslationPolicy() {
   // the 'gpu pass' lines average over the sampled submits. The whole-submit gpu_exec stamps stay on every submit.
   {const char *v=getenv("FUXI_MTL_GPU_PASS_TIMES_EVERY");if(v){char *e=nullptr;long m=strtol(v,&e,10);if(e!=v && !*e && m>=0 && m<=100000)p.passTimesEvery=m?unsigned(m):1u;}fprintf(stderr,"FUXI MTL: policy gpu_pass_times_every=%u\n",p.passTimesEvery);}
   // FUXI_MTL_BUFFER_CACHED=1: MTLBuffer memory prefers a HOST_VISIBLE|HOST_COHERENT|HOST_CACHED type (logged with the type list at the first buffer).
-  {const char *v=getenv("FUXI_MTL_BUFFER_CACHED");p.bufferCached=v && !strcmp(v,"1");}
+  {const char *v=getenv("FUXI_MTL_BUFFER_CACHED");if(v)p.bufferCached=!strcmp(v,"1");}
   {const char *v=getenv("FUXI_MTL_SPIRV_UNROLL");p.spirvUnroll=v && (!strcmp(v,"1") || !strcmp(v,"2"))?unsigned(v[0]-'0'):0;fprintf(stderr,"FUXI MTL: policy spirv_unroll=%u\n",p.spirvUnroll);}
   fprintf(stderr,"FUXI MTL: policy shadow_rename=%d source=%s\n",int(p.shadowRename),renameKey?"boot":renameEnv?"env":"none");
   return p;
