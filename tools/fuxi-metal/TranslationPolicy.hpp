@@ -66,7 +66,11 @@ inline TranslationPolicy systemTranslationPolicy() {
    bool splitKey=false;bool split=translationOption(args,"fuxigpusplit=",&splitKey);if(splitKey){p.splitSubmit=split;fprintf(stderr,"FUXI MTL: policy split_submit=%d boot\n",int(split));}
    bool bufKey=false;bool buf=translationOption(args,"fuxigpubufcached=",&bufKey);if(bufKey){p.bufferCached=buf;fprintf(stderr,"FUXI MTL: policy buffer_cached=%d boot\n",int(buf));}
    bool cpuKey=false;bool cpu=translationOption(args,"fuxigpuframecpu=",&cpuKey);if(cpuKey){p.frameCPU=cpu;fprintf(stderr,"FUXI MTL: policy frame_cpu=%d boot\n",int(cpu));}
-   bool daKey=false;bool da=translationOption(args,"fuxigpudrawarea=",&daKey);if(daKey){p.drawArea=da;fprintf(stderr,"FUXI MTL: policy draw_area=%d boot\n",int(da));}}
+   bool daKey=false;bool da=translationOption(args,"fuxigpudrawarea=",&daKey);if(daKey){p.drawArea=da;fprintf(stderr,"FUXI MTL: policy draw_area=%d boot\n",int(da));}
+   bool rtnKey=false;bool rtn=translationOption(args,"fuxigpurtrename=",&rtnKey);if(rtnKey){p.rtRename=rtn;fprintf(stderr,"FUXI MTL: policy rt_rename=%d boot\n",int(rtn));}
+   bool rtrKey=false;bool rtr=translationOption(args,"fuxigpurtreuse=",&rtrKey);if(rtrKey){p.rtReuse=rtr;fprintf(stderr,"FUXI MTL: policy rt_shadow_reuse=%d boot\n",int(rtr));}
+   bool rtsKey=false;bool rts=translationOption(args,"fuxigpurtshadow=",&rtsKey);if(rtsKey){p.rtShadow=rts;fprintf(stderr,"FUXI MTL: policy rt_shadow=%d boot\n",int(rts));}
+   bool lsKey=false;bool ls=translationOption(args,"fuxigpulinearshadow=",&lsKey);if(lsKey){p.linearShadow=ls;fprintf(stderr,"FUXI MTL: policy linear_shadow=%d boot\n",int(ls));}}
   // FUXI_MTL_SPLIT_SUBMIT=1: a submit with 2+ render passes is recorded into chunks; a chunk is queued at a pass end once its recording took
   // FUXI_MTL_SPLIT_SUBMIT_US (0..100000, default 400, 0 = every pass end), at most FUXI_MTL_SPLIT_SUBMIT_MAX (2..8, default 3: FuxiAdreno queue mode admits
   // 4 jobs in flight) chunks; only the last chunk signals the fence.
