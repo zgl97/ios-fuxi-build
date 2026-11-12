@@ -65,7 +65,8 @@ inline TranslationPolicy systemTranslationPolicy() {
    if(leanKey){p.submitLeanLevel=lean;p.submitLean=lean!=0;fprintf(stderr,"FUXI MTL: policy submit_lean=%u boot\n",lean);}
    bool splitKey=false;bool split=translationOption(args,"fuxigpusplit=",&splitKey);if(splitKey){p.splitSubmit=split;fprintf(stderr,"FUXI MTL: policy split_submit=%d boot\n",int(split));}
    bool bufKey=false;bool buf=translationOption(args,"fuxigpubufcached=",&bufKey);if(bufKey){p.bufferCached=buf;fprintf(stderr,"FUXI MTL: policy buffer_cached=%d boot\n",int(buf));}
-   bool cpuKey=false;bool cpu=translationOption(args,"fuxigpuframecpu=",&cpuKey);if(cpuKey){p.frameCPU=cpu;fprintf(stderr,"FUXI MTL: policy frame_cpu=%d boot\n",int(cpu));}}
+   bool cpuKey=false;bool cpu=translationOption(args,"fuxigpuframecpu=",&cpuKey);if(cpuKey){p.frameCPU=cpu;fprintf(stderr,"FUXI MTL: policy frame_cpu=%d boot\n",int(cpu));}
+   bool daKey=false;bool da=translationOption(args,"fuxigpudrawarea=",&daKey);if(daKey){p.drawArea=da;fprintf(stderr,"FUXI MTL: policy draw_area=%d boot\n",int(da));}}
   // FUXI_MTL_SPLIT_SUBMIT=1: a submit with 2+ render passes is recorded into chunks; a chunk is queued at a pass end once its recording took
   // FUXI_MTL_SPLIT_SUBMIT_US (0..100000, default 400, 0 = every pass end), at most FUXI_MTL_SPLIT_SUBMIT_MAX (2..8, default 3: FuxiAdreno queue mode admits
   // 4 jobs in flight) chunks; only the last chunk signals the fence.
