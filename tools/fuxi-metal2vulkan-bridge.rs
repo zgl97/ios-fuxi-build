@@ -7,10 +7,10 @@ use sha2::{Digest,Sha256};
 use metal2vulkan::cache::PipelineArtifact;
 const SLOTS:u32=16;
 use metal2vulkan::{library::Library, device::{Device,DeviceDescription,DevicePolicy,EnableSet,ApiVersion,VkFeature,VkExtension},
-    pipeline::{RenderPipelineDescriptor,StageSource,FunctionDescriptor,ColorAttachmentDescriptor},
+    pipeline::{RenderPipelineDescriptor,ComputePipelineDescriptor,StageSource,FunctionDescriptor,ColorAttachmentDescriptor},
     metal::{PixelFormat,TextureType,SamplerMinMagFilter,SamplerMipFilter,sampler::OpaqueBlackBorder},
-    pipeline::{Stage,SlotClass,RuntimeDependency,RuntimeFact,Mechanism},
-    bind::{BindState,DrawCall,NeutralResource,BoundTexture,TextureFacts,BoundSampler,SamplerDescriptor,StageTable,WriteSource,ImageSource,SamplerSource},Budget};
+    pipeline::{Stage,SlotClass,RuntimeDependency,RuntimeFact,Mechanism,BindingSource,SamplerRef},
+    bind::{BindState,DrawCall,NeutralResource,BoundTexture,TextureFacts,BoundSampler,SamplerDescriptor,StageTable,WriteSource,ImageSource,SamplerSource,Dispatch},Budget};
 // Public Metal scalar/vector ordinals, packed payload (vector3 padding omitted).
 fn constant_payload_size(ty:u32)->u32 {
  for (base,width) in [(3,4),(16,2),(29,4),(33,4),(37,2),(41,2),(45,1),(49,1),(53,1)] {
@@ -485,7 +485,7 @@ unsafe fn name<'a>(p:*const c_char)->Result<&'a str,String> {
         let function=(*(p as *const Library)).function(name(n)?).map_err(|e|e.to_string())?;
         let info=function.info();
         use metal2vulkan::library::FunctionStage as Stage;
-        match info.stage {Stage::Vertex=>Ok(1),Stage::Fragment=>Ok(2),_=>Err("M6 supports vertex/fragment only".into())}
+        match info.stage {Stage::Vertex=>Ok(1),Stage::Fragment=>Ok(2),Stage::Kernel=>Ok(3),_=>Err("M6 supports vertex/fragment/kernel only".into())}
     }).unwrap_or(0)
 }
 // Device-local object-cache identities. Hash fields, never native struct padding
@@ -629,6 +629,189 @@ fn hash_product(p:&Product)->[u8;32] {
     }).unwrap_or(0)
 }
 #[no_mangle] pub unsafe extern "C" fn fuxi_m2v_free(p:*mut c_void) {if !p.is_null(){drop(Box::from_raw(p as *mut Product));}}
+
+// ---- M6 compute lane ------------------------------------------------------
+// A compute product owns one kernel module and the layout/descriptor/spec
+// facts the bounded Vulkan consumer needs. Pointers live in the Box behind
+// handle; fuxi_m2v_compute_free releases them.
+#[repr(C)]
+#[derive(Clone,Copy)]
+pub struct ComputeTranslation {
+ handle:*mut c_void,spirv:*const u32,spirv_count:usize,entry:*const c_char,
+ push_offset:u32,push_size:u32,push_stages:u32,push_bytes:[u8;128],
+ descriptor_count:u32,descriptors:[Descriptor;16],
+ spec_count:u32,spec_size:u32,specs:[Specialization;32],spec_data:[u8;256],
+ range_count:u32,ranges:[Range;2],
+ max_threads:u32,thread_width:u32,static_threadgroup_memory:u32,indirect:u32,
+}
+#[derive(Clone)]
+struct ComputeProduct {
+ hash:[u8;32],spirv:Arc<[u32]>,entry:CString,
+ push_offset:u32,push_size:u32,push_stages:u32,push_bytes:[u8;128],
+ descriptors:Vec<Descriptor>,specs:Vec<Specialization>,spec_data:Vec<u8>,
+ descriptor:ComputePipelineDescriptor,options:CompileOptions,
+ device:Device,pipeline:metal2vulkan::pipeline::ComputePipeline,
+}
+fn compute_state()->BindState {
+ let mut state=BindState::default();let mut table=StageTable::default();
+ for i in 0..SLOTS {
+  table.buffers.insert(i,metal2vulkan::bind::BoundBuffer::Buffer{length:4096,offset:0,gpu_address:0,device_address:None,attribute_stride:None});
+  table.textures.insert(i,BoundTexture::Texture{facts:TextureFacts::new(TextureType::Type2D,PixelFormat::BGRA8Unorm),resource_id:None});
+  table.samplers.insert(i,BoundSampler::new(SamplerDescriptor::new()));
+ }
+ state.stages.insert(Stage::Kernel,table);state
+}
+fn compute_dependency(d:&RuntimeDependency)->bool {
+ match (d.fact,d.mechanism) {
+  (RuntimeFact::ThreadsPerThreadgroup,Mechanism::Specialization)
+  | (RuntimeFact::LocalSizeLimits,Mechanism::PlanTimeCheck)
+  | (RuntimeFact::LocalSizeConstraint{..},Mechanism::PlanTimeCheck)
+  | (RuntimeFact::DispatchGrid,Mechanism::RegionSelected)
+  | (RuntimeFact::IndirectGroupCount,Mechanism::None|Mechanism::IndirectClamp)=>true,
+  (RuntimeFact::BufferRangeLimit{slot},Mechanism::PlanTimeCheck)=>slot.class==SlotClass::Buffer && slot.index<SLOTS && slot.stage==Stage::Kernel,
+  (RuntimeFact::OutOfBoundsAlpha{slot},Mechanism::Specialization)=>slot.stage==Stage::Kernel && slot.class==SlotClass::Texture && slot.index<SLOTS,
+  (RuntimeFact::SamplerCoordinates{slot},Mechanism::Specialization)=>slot.stage==Stage::Kernel && slot.class==SlotClass::Sampler && slot.index<SLOTS,
+  (RuntimeFact::ConstexprSampled{slot,..},Mechanism::Variant)=>slot.stage==Stage::Kernel && slot.class==SlotClass::Texture && slot.index<SLOTS,
+  (RuntimeFact::CrossClassReads{slot},Mechanism::Variant)=>slot.stage==Stage::Kernel && slot.class==SlotClass::Texture && slot.index<SLOTS,
+  _=>false,
+ }
+}
+fn reflect_compute_textures(pipeline:&metal2vulkan::pipeline::ComputePipeline,state:&mut BindState)->Result<(),String> {
+ for (slot,interface) in &pipeline.interface.slots {
+  if let metal2vulkan::pipeline::SlotInterface::Texture(texture)=interface {
+   if slot.stage!=Stage::Kernel || slot.index>=SLOTS || !matches!(texture.texture_type,TextureType::Type1D|TextureType::Type2D|TextureType::Type3D){return Err(format!("bounded compute texture dimension stage={:?} slot={} type={:?}",slot.stage,slot.index,texture.texture_type));}
+   if let Some(table)=state.stages.get_mut(&slot.stage){if let Some(BoundTexture::Texture{facts,..})=table.textures.get_mut(&slot.index){
+    facts.texture_type=texture.texture_type;
+    facts.pixel_format=match texture.sampled_type {metal2vulkan::pipeline::SampledType::Float=>PixelFormat::BGRA8Unorm,metal2vulkan::pipeline::SampledType::Uint=>PixelFormat::R32Uint,metal2vulkan::pipeline::SampledType::Sint=>PixelFormat::R32Sint,_=>return Err("unsupported compute texture numeric type".into())};
+   }}
+  }
+ }
+ Ok(())
+}
+fn hash_compute_product(p:&ComputeProduct)->[u8;32] {
+ let mut h=Sha256::new();
+ h.update((p.spirv.len() as u64).to_le_bytes());for w in p.spirv.iter(){h.update(w.to_le_bytes());}
+ h.update(p.entry.to_bytes());
+ for d in &p.descriptors {h.update(d.binding.to_le_bytes());h.update(d.ty.to_le_bytes());h.update(d.stages.to_le_bytes());h.update(d.slot.to_le_bytes());h.update(d.format.to_le_bytes());h.update(d.offset.to_le_bytes());h.update(d.range.to_le_bytes());}
+ h.update((p.specs.len() as u32).to_le_bytes());for s in &p.specs {h.update(s.id.to_le_bytes());h.update(s.offset.to_le_bytes());h.update(s.size.to_le_bytes());}
+ h.update(&p.spec_data);
+ let mut out=[0u8;32];out.copy_from_slice(&h.finalize());out
+}
+fn make_compute_product(device:Device,descriptor:ComputePipelineDescriptor,options:&CompileOptions,mut state:BindState)->Result<ComputeProduct,String> {
+ let _time=TranslationTimer::new("compute-product");
+ let pipeline=device.compile_compute_pipeline(&descriptor,&Budget::standard()).map_err(|e|e.to_string())?;
+ if pipeline.layout.sets.len()>1 {return Err(format!("M6 compute sets count={}",pipeline.layout.sets.len()));}
+ for set in &pipeline.layout.sets {
+  if set.set!=0 || set.flags.as_raw()!=0 || set.bindings.len()>16 {return Err(format!("M6 compute set={} flags={} bindings={}",set.set,set.flags.as_raw(),set.bindings.len()));}
+ }
+ for d in &pipeline.dependencies {if !compute_dependency(d){return Err(dependency_error(d));}}
+ reflect_compute_textures(&pipeline,&mut state)?;
+ let plan=pipeline.plan(&device,&state.shape()).map_err(|e|e.to_string())?;
+ if !plan.diagnostics.is_empty(){return Err(format!("M6 compute plan diagnostics count={}",plan.diagnostics.len()));}
+ if !plan.variant.is_empty(){return Err("compute requires runtime variant".into());}
+ let mut descriptors=Vec::new();
+ for set in &pipeline.layout.sets {for b in &set.bindings {
+  if b.count!=1 || b.flags.as_raw()!=0 || !matches!(b.ty.as_raw() as u32,0|1|2|6|7|10) || b.stages.as_raw()&!32!=0 {return Err(format!("M6 compute descriptor set={} binding={} type={} count={} flags={} immutable={} stages={}",set.set,b.binding,b.ty.as_raw(),b.count,b.flags.as_raw(),b.immutable_sampler.is_some(),b.stages.as_raw()));}
+  if b.immutable_sampler.is_some(){return Err("M6 compute immutable sampler".into());}
+  let mut descriptor=Descriptor{binding:b.binding,ty:b.ty.as_raw() as u32,stages:b.stages.as_raw(),set:set.set,sampler:0,..Descriptor::default()};
+  match b.source {
+   BindingSource::Buffer(slot)=>descriptor.slot=slot.index,
+   BindingSource::Texture(slot)=>descriptor.slot=slot.index,
+   BindingSource::Sampler(slot)=>descriptor.sampler=slot.index,
+   BindingSource::CombinedTextureSampler{texture,sampler}=>{descriptor.slot=texture.index;if let SamplerRef::Slot(index)=sampler.sampler{descriptor.sampler=index;}}
+   BindingSource::SeparateTexture{texture,..}=>descriptor.slot=texture.index,
+   BindingSource::SeparateSampler{sampler,..}=>if let SamplerRef::Slot(index)=sampler.sampler{descriptor.sampler=index;},
+   _=>return Err(format!("M6 compute binding source unsupported: {:?}",b.source)),
+  }
+  descriptors.push(descriptor);
+ }}
+ let commands=plan.instantiate_dispatch(&state,&Dispatch::Threadgroups{groups:[1,1,1],threads_per_group:[1,1,1]}).map_err(|e|e.to_string())?;
+ if commands.regions.len()!=1{return Err(format!("compute dispatch regions={}",commands.regions.len()));}
+ let region=commands.regions.first().ok_or("compute dispatch has no region")?;
+ if region.specialization.entries.len()>32 || region.specialization.data.len()>256 {return Err("specialization bound".into());}
+ let specs=region.specialization.entries.iter().map(|e|Specialization{id:e.constant_id,offset:e.offset,size:e.size as u32}).collect();
+ if !commands.descriptor_bytes.is_empty() || !commands.push_holes.is_empty() || commands.root_table.is_some() || commands.indirect_clamp.is_some() {return Err("compute dispatch requires unsupported staging".into());}
+ for r in &commands.descriptor_ranges {if let Some(d)=descriptors.iter_mut().find(|d|d.set==r.set && d.binding==r.binding){d.offset=r.range.offset;d.range=r.range.range;}}
+ let mut push_bytes=[0u8;128];let(mut push_offset,mut push_size,mut push_stages)=(0,0,0);
+ if pipeline.layout.push_constants.len()>2{return Err("push ranges".into());}
+ for r in &pipeline.layout.push_constants {if r.offset>128 || r.size>128-r.offset || r.offset%4!=0 || r.size%4!=0 || r.stages.as_raw()&!32!=0 {return Err("push range bound".into());}}
+ if let Some(w)=commands.regions.first().and_then(|r|r.push_constants.first()){if w.bytes.len()>128{return Err("initial push write bounds".into());}push_offset=w.offset;push_size=w.bytes.len() as u32;push_stages=w.stages.as_raw();push_bytes[..w.bytes.len()].copy_from_slice(&w.bytes);}
+ let s=&pipeline.stage;
+ if s.required_subgroup_size.is_some() || s.stage_flags.as_raw()!=0 {return Err(format!("M6 compute stage subgroup={:?} flags={}",s.required_subgroup_size,s.stage_flags.as_raw()));}
+ let mut product=ComputeProduct{hash:[0;32],spirv:s.spirv.clone(),entry:CString::new(s.entry_point.clone()).map_err(|e|e.to_string())?,push_offset,push_size,push_stages,push_bytes,descriptors,specs,spec_data:region.specialization.data.clone(),descriptor,options:*options,device,pipeline:pipeline.clone()};
+ product.hash=hash_compute_product(&product);Ok(product)
+}
+unsafe fn compute_output(out:*mut ComputeTranslation,product:ComputeProduct) {
+ let product=Box::new(product);let mut descriptors=[Descriptor::default();16];
+ descriptors[..product.descriptors.len()].copy_from_slice(&product.descriptors);
+ let mut specs=[Specialization::default();32];specs[..product.specs.len()].copy_from_slice(&product.specs);
+ let mut spec_data=[0u8;256];spec_data[..product.spec_data.len()].copy_from_slice(&product.spec_data);
+ let mut ranges=[Range::default();2];ranges[..product.pipeline.layout.push_constants.len()].copy_from_slice(&product.pipeline.layout.push_constants.iter().map(|r|Range{offset:r.offset,size:r.size,stages:r.stages.as_raw()}).collect::<Vec<_>>());
+ *out=ComputeTranslation{handle:std::ptr::null_mut(),spirv:product.spirv.as_ptr(),spirv_count:product.spirv.len(),entry:product.entry.as_ptr(),
+  push_offset:product.push_offset,push_size:product.push_size,push_stages:product.push_stages,push_bytes:product.push_bytes,
+  descriptor_count:product.descriptors.len() as u32,descriptors,spec_count:product.specs.len() as u32,spec_size:product.spec_data.len() as u32,specs,spec_data,
+  range_count:product.pipeline.layout.push_constants.len() as u32,ranges,
+  max_threads:product.pipeline.metal_info.max_total_threads_per_threadgroup,thread_width:product.pipeline.metal_info.thread_execution_width,
+  static_threadgroup_memory:product.pipeline.metal_info.static_threadgroup_memory_length,indirect:product.pipeline.metal_info.support_indirect_command_buffers as u32};
+ (*out).handle=Box::into_raw(product).cast();
+}
+#[no_mangle] pub unsafe extern "C" fn fuxi_m2v_compile_compute(v:*mut c_void,vn:*const c_char,gipa:*mut c_void,instance:u64,physical:u64,options:*const CompileOptions,out:*mut ComputeTranslation,err:*mut c_char,cap:usize)->i32 {
+ attempt(err,cap,|| {
+  if v.is_null() || gipa.is_null() || out.is_null(){return Err("nil compute compile argument".into());}
+  if options.is_null(){return Err("nil compute compile options".into());}let options=&*options;
+  let entry=ash::Entry::from_static_fn(ash::StaticFn{get_instance_proc_addr:std::mem::transmute(gipa)});
+  let inst=ash::Instance::load(entry.static_fn(),vk::Instance::from_raw(instance));
+  let lib=&*(v as *const Library);
+  let function=lib.function(name(vn)?).map_err(|e|e.to_string())?;
+  use metal2vulkan::library::FunctionStage as FStage;
+  if function.info().stage!=FStage::Kernel{return Err("compute pipeline requires a kernel function".into());}
+  let mut kernel=FunctionDescriptor::new(function);
+  if options.constant_count[0]>128{return Err("constant count".into());}
+  for c in &options.constants[0][..options.constant_count[0] as usize] {
+   if c.size==0 || c.size!=constant_payload_size(c.ty){return Err("constant size".into());}
+   let ty=metal2vulkan::metal::DataType::try_from(c.ty).map_err(|e|e.to_string())?;
+   let value=metal2vulkan::library::FunctionConstantValue::new(ty,c.bytes[..c.size as usize].to_vec());
+   if c.name[0]==0 {kernel.constants=kernel.constants.clone().with_index(c.index,value);}
+   else {let end=c.name.iter().position(|b|*b==0).ok_or("constant name length")?;let name=std::str::from_utf8(&c.name[..end]).map_err(|e|e.to_string())?;kernel.constants=kernel.constants.clone().with_name(name,value);}
+  }
+  let props=inst.get_physical_device_properties(vk::PhysicalDevice::from_raw(physical));
+  let mut identity=Sha256::new();identity.update(b"M9g-compute-v1");
+  identity.update((name(vn)?.len() as u64).to_le_bytes());identity.update(name(vn)?.as_bytes());
+  identity.update(&options.device_features.to_le_bytes());
+  let mut input=[0u8;32];input.copy_from_slice(&identity.finalize());
+  let key=format!("compute-v1/{input:?}/{}/{}/{}/{}/{:?}",props.api_version,props.driver_version,props.vendor_id,props.device_id,props.pipeline_cache_uuid);
+  let _=key;
+  if options.device_features>>7!=0 {return Err("unknown device feature bits".into());}
+  let mut enabled=EnableSet::new();
+  if options.device_features&1!=0 {enabled.features.insert(VkFeature::ShaderFloat16);}
+  if options.device_features&2!=0 {enabled.features.insert(VkFeature::StorageBuffer16BitAccess);}
+  if options.device_features&4!=0 {enabled.features.insert(VkFeature::UniformAndStorageBuffer16BitAccess);}
+  if options.device_features&8!=0 {enabled.features.insert(VkFeature::ShaderInt16);}
+  if options.device_features&16!=0 {enabled.features.insert(VkFeature::RobustBufferAccess);}
+  if options.device_features&32!=0 {enabled.features.insert(VkFeature::RobustBufferAccess2);}
+  if options.device_features&64!=0 {enabled.features.insert(VkFeature::RobustImageAccess2);}
+  if options.device_features&96!=0 {enabled.extensions.insert(VkExtension::ExtRobustness2);}
+  let desc=DeviceDescription::query(&inst,vk::PhysicalDevice::from_raw(physical),ApiVersion::V1_2).map_err(|e|e.to_string())?.with_enabled(&enabled).map_err(|e|e.to_string())?;
+  let device=Device::new(desc,DevicePolicy::default()).map_err(|e|e.to_string())?;
+  let descriptor=ComputePipelineDescriptor::new(StageSource::Function(kernel));
+  let product=make_compute_product(device,descriptor,options,compute_state())?;
+  eprintln!("FUXI MTL: compute compiled entry={} spirv={} descriptors={} specs={} spec_size={} max_threads={} thread_width={}",name(vn)?,product.spirv.len(),product.descriptors.len(),product.specs.len(),product.spec_data.len(),product.pipeline.metal_info.max_total_threads_per_threadgroup,product.pipeline.metal_info.thread_execution_width);
+  compute_output(out,product);Ok(1)
+ }).unwrap_or(0)
+}
+#[no_mangle] pub unsafe extern "C" fn fuxi_m2v_compute_specialization(handle:*mut c_void,local:*const u32,multi:u32,out:*mut u8,cap:usize,size:*mut u32)->i32 {
+ if handle.is_null() || local.is_null() || out.is_null() || size.is_null(){return 0;}
+ let p=&*(handle as *const ComputeProduct);let l=[*local,*local.add(1),*local.add(2)];
+ let mut data=p.spec_data.clone();
+ for c in &p.pipeline.stage.specialization.constants {
+  let v=match c.key {metal2vulkan::pipeline::SpecKey::LocalSize(axis)=>l[match axis {metal2vulkan::pipeline::Axis::X=>0,metal2vulkan::pipeline::Axis::Y=>1,metal2vulkan::pipeline::Axis::Z=>2,_=>0}] as u64,
+   metal2vulkan::pipeline::SpecKey::FlatLocalSize=>l[0] as u64*l[1] as u64*l[2] as u64,
+   metal2vulkan::pipeline::SpecKey::MultiRegion=>multi as u64,_=>c.default};
+  if let Some(e)=p.specs.iter().find(|e|e.id==c.id){let at=e.offset as usize;if c.size!=4 || at+4>data.len(){return 0;}data[at..at+4].copy_from_slice(&(v as u32).to_le_bytes());}
+ }
+ if data.len()>cap{return 0;}std::ptr::copy_nonoverlapping(data.as_ptr(),out,data.len());*size=data.len() as u32;1
+}
+#[no_mangle] pub unsafe extern "C" fn fuxi_m2v_compute_free(p:*mut c_void) {if !p.is_null(){drop(Box::from_raw(p as *mut ComputeProduct));}}
 
 #[cfg(test)]
 mod tests {
