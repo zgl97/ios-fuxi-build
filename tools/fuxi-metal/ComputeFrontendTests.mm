@@ -15,7 +15,7 @@ static void refuses(FuxiCommandBuffer *c,void (^body)()){
 }
 int main(){@autoreleasepool {
  Class cls=makeDeviceClass([FuxiComputeTestBase class]);id device=[cls alloc];FuxiOwner *state=[FuxiOwner new];state->backend=new fuxi::Backend;
- objc_setAssociatedObject(device,&ownerKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);[state release];fuxi::Backend::modelTextures=true;
+ objc_setAssociatedObject(device,&ownerKey,state,OBJC_ASSOCIATION_RETAIN_NONATOMIC);[state release];fuxi::Backend::modelTextures=true;fuxi::Backend::modelPipelines=true;
  FuxiQueue *queue=(FuxiQueue *)[device newCommandQueue];
  FuxiLibrary *lib=[FuxiLibrary new];lib->_device=[device retain];
  FuxiFunction *kernel=[FuxiFunction new];kernel->_library=[lib retain];kernel->_name=[@"test_kernel" copy];kernel->_stage=3;
