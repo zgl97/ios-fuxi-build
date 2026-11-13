@@ -100,13 +100,13 @@ public:
   if(!modelPipelines)throw std::runtime_error("M4 CPU model has no translation");
   // The ABI input consists only of initialized 32-bit fields/byte arrays.
   static_assert(sizeof(CompileOptions)==40364);
-  std::string key=std::string(v)+"/"+f+"/";key.append((const char *)&options,sizeof(options));
+  std::string key=std::string(v?(const char *)v:"")+"/"+f+"/";key.append((const char *)&options,sizeof(options));
   if(auto *p=objects.acquire(key)){++pipelineHits;return p;}
   ++pipelineMisses;auto *p=new Pipeline{};p->options=options;objects.insert(key,key,p,sizeof(Pipeline),[&](Pipeline *old){destroy(old);});return p;
  }
  Pipeline *compileComputePipeline(void *v,const char *vn,const CompileOptions &options=CompileOptions{}) {
   if(!modelPipelines)throw std::runtime_error("M4 CPU model has no translation");
-  std::string key=std::string((const char *)v)+"/"+vn;key.append((const char *)&options,sizeof(options));
+  std::string key=std::string(v?(const char *)v:"")+"/"+vn;key.append((const char *)&options,sizeof(options));
   if(auto *p=objects.acquire(key)){++pipelineHits;return p;}
   ++pipelineMisses;auto *p=new Pipeline{};p->options=options;p->computeRecipe.maxThreads=1024;p->computeRecipe.threadWidth=32;p->computeTranslation=(void *)1;objects.insert(key,key,p,sizeof(Pipeline),[&](Pipeline *old){destroy(old);});return p;
  }
