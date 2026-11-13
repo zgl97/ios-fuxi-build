@@ -62,3 +62,7 @@ fragment float4 fuxi_four_fragment(FuxiM7Varying v [[stage_in]],
  sampler s0 [[sampler(0)]],sampler s1 [[sampler(1)]],sampler s2 [[sampler(2)]],sampler s3 [[sampler(3)]]) {
  return (a.sample(s0,v.uv)+b.sample(s1,v.uv)+c.sample(s2,v.uv)+d.sample(s3,v.uv))*0.25f;
 }
+// M8 compute coverage: deterministic storage-buffer write, verified by the smoke.
+kernel void fuxi_compute(device uint *values [[buffer(0)]], uint id [[thread_position_in_grid]]) {
+ values[id] = id * 3u + 7u;
+}
