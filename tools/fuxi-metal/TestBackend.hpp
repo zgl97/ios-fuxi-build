@@ -26,7 +26,7 @@ struct PrepareWrite {Buffer *buffer;uint64_t offset,bytes;};
 struct Texture : TextureLevels {size_t allocated{},charged{};uint32_t format=80;Buffer *backingBuffer{};size_t backingOffset{},backingRow{};bool shadow=false;std::vector<uint8_t> pixels{};
  size_t offset(uint32_t level) const {size_t o=0;for(uint32_t l=0;l<level;++l)o+=levelWidth(l)*levelHeight(l)*levelDepth(l)*metalTexelBytes(format);return o;}
 };
-struct Pipeline {ShadowWindow shadowWindows[2][resourceSlots]{};CompileOptions options{};bool sampled=false;size_t references=1;};
+struct Pipeline {ShadowWindow shadowWindows[2][resourceSlots]{};CompileOptions options{};bool sampled=false;size_t references=1;ComputeTranslation computeRecipe{};void *computeTranslation{};};
 struct Sampler {};
 struct Viewport {float x,y,width,height,minDepth,maxDepth;};
 struct Rect {struct {int32_t x,y;}offset;struct {uint32_t width,height;}extent;};
@@ -42,7 +42,7 @@ struct Operation {
  Viewport viewport{0,256,256,-256,0,1};Rect scissor{{0,0},{256,256}};
  uint32_t areaWidth{},areaHeight{};
  uint32_t srcLevel{},dstLevel{},sampleBase[resourceSlots]{},sampleCount[resourceSlots]{};bool generateMips=false;uint32_t mipBase{},mipCount{};
- OperationDiagnostic diagnostic{};uint32_t colorCount=1,colorMask=1;ColorTarget colors[7]{};
+ OperationDiagnostic diagnostic{};uint32_t colorCount=1,colorMask=1;ColorTarget colors[7]{};bool compute=false;uint32_t computeGroups[3]{},computeThreads[3]{};
  ColorTarget color(unsigned i) const {if(!(colorMask&(1u<<i)))return {};if(i)return colors[i-1];ColorTarget c{texture,dstLevel,load,store,{}};memcpy(c.clear,clear,sizeof(clear));return c;}
  void setColor(unsigned i,const ColorTarget &c){if(i){colors[i-1]=c;return;}texture=c.texture;dstLevel=c.level;load=c.load;store=c.store;memcpy(clear,c.clear,sizeof(clear));}
 
@@ -104,6 +104,12 @@ public:
   if(auto *p=objects.acquire(key)){++pipelineHits;return p;}
   ++pipelineMisses;auto *p=new Pipeline{};p->options=options;objects.insert(key,key,p,sizeof(Pipeline),[&](Pipeline *old){destroy(old);});return p;
  }
+ Pipeline *compileComputePipeline(void *v,const char *vn,const CompileOptions &options=CompileOptions{}) {
+  if(!modelPipelines)throw std::runtime_error("M4 CPU model has no translation");
+  std::string key=std::string((const char *)v)+"/"+vn;key.append((const char *)&options,sizeof(options));
+  if(auto *p=objects.acquire(key)){++pipelineHits;return p;}
+  ++pipelineMisses;auto *p=new Pipeline{};p->options=options;p->computeRecipe.maxThreads=1024;p->computeRecipe.threadWidth=32;p->computeTranslation=(void *)1;objects.insert(key,key,p,sizeof(Pipeline),[&](Pipeline *old){destroy(old);});return p;
+ }
  bool destroy(Texture *t) {if(t){limits.release(t->charged);delete t;}return !poisoned;}
  void destroy(Pipeline *p) {if(p && !--p->references)delete p;}
  bool requiresSampling(const Pipeline *p) const {return p->sampled;}
@@ -116,6 +122,7 @@ public:
   if(ops.empty()){++emptySubmits;if(scheduled)scheduled();return;}
   ++submissions;if(scheduled)scheduled();
   for(auto &op:ops) {
+   if(op.compute){if(op.pipeline && modelDraw)modelDraw(op);continue;}
    if(op.texture){auto *t=op.texture;
     if(op.pipeline){if(!modelDraw)throw std::runtime_error("CPU model has no shaders");modelDraw(op);continue;}
     uint32_t l=op.upload || op.sourceTexture || op.clearOnly?op.dstLevel:op.srcLevel;
