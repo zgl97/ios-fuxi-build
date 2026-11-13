@@ -677,7 +677,7 @@ static bool textureDescriptorAccepted(MTLTextureDescriptor *d,uint32_t dimension
  CHECK("mipmapLevelCount",d.mipmapLevelCount,actual && actual<=fuxi::mipCount((uint32_t)d.width,(uint32_t)d.height));CHECK("arrayLength",d.arrayLength,actual==1);CHECK("sampleCount",d.sampleCount,actual==1);CHECK("swizzle.identity",identitySwizzle(d.swizzle),actual);
  CHECK("storageMode",d.storageMode,actual==MTLStorageModePrivate || actual==MTLStorageModeShared || actual==MTLStorageModeMemoryless);CHECK("cpuCacheMode",d.cpuCacheMode,actual==MTLCPUCacheModeDefaultCache || actual==MTLCPUCacheModeWriteCombined);
  CHECK("hazardTrackingMode",d.hazardTrackingMode,actual==MTLHazardTrackingModeDefault || actual==MTLHazardTrackingModeTracked);
- CHECK("usage",d.usage,!(actual&~(MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsagePixelFormatView)));
+ CHECK("usage",d.usage,!(actual&~(MTLTextureUsageRenderTarget|MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite|MTLTextureUsagePixelFormatView)) && (!(actual&MTLTextureUsageShaderWrite) || (actual&MTLTextureUsageShaderRead)));
  CHECK("pixelFormat.A8RenderTarget",d.pixelFormat,actual!=MTLPixelFormatA8Unorm || (!(d.usage&MTLTextureUsageRenderTarget) && d.usage!=MTLTextureUsageUnknown));
  // allowGPUOptimizedContents is an implementation hint, not pixel semantics.
 #undef CHECK
