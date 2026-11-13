@@ -67,6 +67,18 @@ struct Translation {
  uint32_t pushOffset{},pushSize{},pushStages{};uint8_t pushBytes[128]{};uint32_t descriptorCount{};Descriptor descriptors[16]{};uint32_t specCount{},specSize{};Specialization specs[32]{};uint8_t specData[256]{};
  uint32_t bindingCount{},attributeCount{};VertexBinding bindings[4]{};VertexAttribute attributes[8]{};uint32_t format{},blend{},mask{},factors[6]{};uint32_t rangeCount{};Range ranges[2]{};uint32_t fetchMask{},orderedColorAccess{};uint32_t blobCount{};Blob blobs[2]{};ColorBlend colors[8]{};
 };
+// Compute lane: one kernel module plus the layout and dispatch facts the
+// bounded Vulkan consumer needs. Pointers live in the Box behind handle.
+struct ComputeTranslation {
+ void *handle{}; const uint32_t *spirv{}; size_t spirvCount{}; const char *entry{};
+ uint32_t pushOffset{},pushSize{},pushStages{};uint8_t pushBytes[128]{};
+ uint32_t descriptorCount{};Descriptor descriptors[16]{};
+ uint32_t specCount{},specSize{};Specialization specs[32]{};uint8_t specData[256]{};
+ uint32_t rangeCount{};Range ranges[2]{};
+ uint32_t maxThreads{},threadWidth{},staticThreadgroupMemory{},indirect{};
+};
+static_assert(sizeof(Descriptor)==64,"compute descriptor ABI");
+static_assert(sizeof(ComputeTranslation)==1896,"compute translation ABI");
 class Translator {
  void *dylib{};
 public:
@@ -107,6 +119,9 @@ public:
  int (*shadow_windows)(void *,ShadowWindow *){}; // Optional immutable access proof; absent means whole buffers.
  uint32_t (*texture_type)(void *,uint32_t){}; // Optional ABI-8 reflected Metal type; UINT32_MAX means unused.
  void (*free)(void *){};
+ int (*compile_compute)(void *,const char *,void *,uint64_t,uint64_t,const CompileOptions *,ComputeTranslation *,char *,size_t){};
+ int (*compute_specialization)(void *,const uint32_t *,uint32_t,uint8_t *,size_t,uint32_t *){};
+ void (*compute_free)(void *){};
  Translator() {
   dylib=dlopen(FUXI_MTL_TRANSLATOR,RTLD_NOW|RTLD_LOCAL);
   if(!dylib)throw std::runtime_error("dlopen external metal2vulkan failed");
@@ -124,6 +139,9 @@ public:
   artifactScopeVerified=(CacheScopeVerified)dlsym(dylib,"fuxi_m2v_artifact_scope_v2");
   artifactVerify=(CacheVerify)dlsym(dylib,"fuxi_m2v_artifact_verify_v2");
   if(!artifactVerify)artifactScopeVerified=nullptr;
+  compile_compute=(decltype(compile_compute))dlsym(dylib,"fuxi_m2v_compile_compute");
+  compute_specialization=(decltype(compute_specialization))dlsym(dylib,"fuxi_m2v_compute_specialization");
+  compute_free=(decltype(compute_free))dlsym(dylib,"fuxi_m2v_compute_free");
  }
  ~Translator() {if(dylib)dlclose(dylib);}
  Translator(const Translator&)=delete;Translator& operator=(const Translator&)=delete;
