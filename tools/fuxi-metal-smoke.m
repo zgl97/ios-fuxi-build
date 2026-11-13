@@ -124,6 +124,26 @@ static void pipeline(id<MTLDevice>device,id<MTLCommandQueue>q) {
  for(unsigned i=0;i<6;++i)if(pixels[(samples[i][1]*256+samples[i][0])*4+2]!=samples[i][2])fail("inside/outside sample %u",i);
  if(red<8064 || red>8320 || red+black!=65536)fail("pixel counts red %u black %u",red,black);
  printf("FUXI MTL: stage 4 pipeline PASS BGRA8 256x256 inside/outside 6 red %u clear %u + sentinel edges\n",red,black);
+ // M8 compute: kernel in the main metallib; raw AIR bitcode remains a local fallback.
+ error=nil;id<MTLLibrary> computeLibrary=nil;id<MTLFunction> kernel=[library newFunctionWithName:@"fuxi_compute"];
+ if(!kernel){error=nil;NSURL *computeURL=[NSURL fileURLWithPath:@"/usr/local/share/fuxi/metal-compute.bc"];computeLibrary=[device newLibraryWithURL:computeURL error:&error];if(!computeLibrary || error)fail("compute library %s",error.description.UTF8String);kernel=[computeLibrary newFunctionWithName:@"fuxi_compute"];}
+ if(!kernel || kernel.functionType!=MTLFunctionTypeKernel)fail("compute kernel function");
+ id<MTLComputePipelineState> cp=[device newComputePipelineStateWithFunction:kernel error:&error];
+ if(!cp || error)fail("compute pipeline %s",error.description.UTF8String);
+ if(cp.maxTotalThreadsPerThreadgroup<64)fail("compute max threads %lu",(unsigned long)cp.maxTotalThreadsPerThreadgroup);
+ id<MTLBuffer> values=[device newBufferWithLength:65536+512 options:MTLResourceStorageModeShared];
+ if(!values)fail("compute buffer allocation");memset(values.contents,0x39,values.length);
+ id<MTLCommandBuffer> cc=q.commandBuffer;if(!cc)fail("nil compute command buffer");
+ id<MTLComputeCommandEncoder> ce=[cc computeCommandEncoder];if(!ce)fail("nil compute encoder");
+ [ce setComputePipelineState:cp];[ce setBuffer:values offset:0 atIndex:0];
+ [ce dispatchThreads:MTLSizeMake(16384,1,1) threadsPerThreadgroup:MTLSizeMake(64,1,1)];
+ [ce endEncoding];finish(cc);
+ const uint32_t *out=(const uint32_t *)values.contents;
+ for(unsigned i=0;i<16384;++i)if(out[i]!=i*3u+7u)fail("compute value %u got %u",i,out[i]);
+ const uint8_t *tail=(const uint8_t *)values.contents+65536;
+ for(unsigned i=0;i<512;++i)if(tail[i]!=0x39)fail("compute sentinel %u",i);
+ printf("FUXI MTL: stage 4 compute PASS kernel dispatchThreads 16384 threads + sentinel edges\n");
+ [values release];[cp release];[kernel release];[computeLibrary release];
  [b release];[t release];[p release];[pd release];[v release];[f release];[library release];[dataLibrary release];
 }
 static IOSurfaceRef surface(void) {
