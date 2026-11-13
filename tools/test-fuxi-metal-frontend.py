@@ -106,7 +106,7 @@ def main():
         frameworks=['-framework','Foundation','-framework','Metal','-framework','IOSurface']
         def call(command):subprocess.run(command,check=True)
         if a.compile_only:
-            for name in ['EncodingFrontendTests','ShadowFrontendTests','OverlapFrontendTests','AsyncPipelineFrontendTests','ConstantFrontendTests','FrontendTests','PipelineFrontendTests','CAFrontendTests','MipFrontendTests','MRTFrontendTests','GateFrontendTests','CensusTests','RenderServerFrontendTests','BlitFrontendTests','LinearFrontendTests','ScanoutFrontendTests']:
+            for name in ['EncodingFrontendTests','ShadowFrontendTests','OverlapFrontendTests','AsyncPipelineFrontendTests','ConstantFrontendTests','FrontendTests','PipelineFrontendTests','CAFrontendTests','MipFrontendTests','MRTFrontendTests','GateFrontendTests','CensusTests','RenderServerFrontendTests','BlitFrontendTests','LinearFrontendTests','ScanoutFrontendTests','ComputeFrontendTests']:
                 call(['xcrun','clang++','-std=c++17',*flags,str(ROOT/'tools/fuxi-metal'/(name+'.mm')),*frameworks,'-o',str(d/name)])
             print('PASS: compile-only frontend tests; no test executables run')
             return
@@ -124,6 +124,8 @@ def main():
         subprocess.run([str(d/'linear')],env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'),check=True,timeout=15)
         call(['xcrun','clang++','-std=c++17',*flags,str(ROOT/'tools/fuxi-metal/BlitFrontendTests.mm'),*frameworks,'-o',str(d/'blits')])
         subprocess.run([str(d/'blits')],env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'),check=True,timeout=15)
+        call(['xcrun','clang++','-std=c++17',*flags,str(ROOT/'tools/fuxi-metal/ComputeFrontendTests.mm'),*frameworks,'-o',str(d/'compute')])
+        subprocess.run([str(d/'compute')],env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'),check=True,timeout=15)
         call(['xcrun','clang++','-std=c++17',*flags,str(ROOT/'tools/fuxi-metal/RenderServerFrontendTests.mm'),*frameworks,'-o',str(d/'server')])
         server=subprocess.run([str(d/'server')],env=dict(os.environ,ASAN_OPTIONS='detect_leaks=0'),text=True,capture_output=True,check=True,timeout=15)
         assert server.stderr.count('draw dropped missing render pipeline')==1,server.stderr
