@@ -487,7 +487,7 @@ static NSData *constantSnapshot(MTLFunctionConstantValues *values) {
 - (void)dealloc {[_library release];[_name release];[_constants release];[super dealloc];}
 - (id)device {CENSUS();return _library->_device;}
 - (NSString *)name {CENSUS();return _name;}
-- (MTLFunctionType)functionType {CENSUS();return _stage==1?MTLFunctionTypeVertex:MTLFunctionTypeFragment;}
+- (MTLFunctionType)functionType {CENSUS();return _stage==1?MTLFunctionTypeVertex:_stage==3?MTLFunctionTypeKernel:MTLFunctionTypeFragment;}
 - (MTLFunctionOptions)options {CENSUS();return MTLFunctionOptionNone;}
 - (MTLFunctionDescriptor *)functionDescriptor {CENSUS();
  MTLFunctionDescriptor *d=[MTLFunctionDescriptor functionDescriptor];d.name=_name;
@@ -809,11 +809,14 @@ static bool textureDescriptorAccepted(MTLTextureDescriptor *d,uint32_t dimension
  return [self newLinearTextureWithDescriptor:d offset:offset bytesPerRow:row bytesPerImage:0];
 }
 @end
-@interface FuxiPipeline : FuxiLabeledObject { @public id _device; fuxi::Pipeline *_pipeline;NSString *_descriptorText; }
+@interface FuxiPipeline : FuxiLabeledObject { @public id _device; fuxi::Pipeline *_pipeline;NSString *_descriptorText;BOOL _compute; }
 @end
 @implementation FuxiPipeline
 - (void)dealloc {[_descriptorText release];if(_pipeline)owner(_device)->backend->destroy(_pipeline);[_device release];[super dealloc];}
 - (id)device {CENSUS();return _device;}
+- (NSUInteger)maxTotalThreadsPerThreadgroup {CENSUS();return _compute && _pipeline ? _pipeline->computeRecipe.maxThreads : 0;}
+- (NSUInteger)threadExecutionWidth {CENSUS();return _compute && _pipeline ? _pipeline->computeRecipe.threadWidth : 0;}
+- (NSUInteger)staticThreadgroupMemoryLength {CENSUS();return _compute && _pipeline ? _pipeline->computeRecipe.staticThreadgroupMemory : 0;}
 @end
 // Survey mode: CA aborts on a nil render pipeline ("Metal failed to build render
 // pipeline", device M9l survey boot). After the refusal is recorded, hand back an
@@ -939,6 +942,9 @@ static thread_local FuxiCommandBuffer *completionCommand;
 // Every selector forwards to rejectSelector:, so the command buffer stays rejected and commits with an error.
 @interface FuxiRefusedRender : FuxiLabeledObject { @public FuxiCommandBuffer *_command; }
 @end
+// Compute encoder: one dispatch per encoder, committed like a blit operation.
+@interface FuxiCompute : FuxiLabeledObject { @public FuxiCommandBuffer *_command; FuxiPipeline *_pipeline; BOOL _ended; fuxi::Operation _state; }
+@end
 // Preserve first-use ordering and command-buffer ownership, retaining each
 // object once. Commit shadow refresh/scanout leasing then visits each once too.
 static void retainCommandResource(FuxiCommandBuffer *command,id resource,bool bounded=false,fuxi::ShadowFullReason reason=fuxi::ShadowFullReason::other,bool sampledOnly=false){
@@ -986,7 +992,7 @@ static void prepareCommandShadows(FuxiCommandBuffer *command,fuxi::FrameSample *
   budget+=op.vertices;indices.try_emplace(op.indices,op.indices->length).first->second.add(op.indexOffset,uint64_t(op.vertices)*op.indexWidth);
  }
  for(auto &entry:indices){auto &use=command->_shadowUses.at(entry.first);command->_shadows.add(entry.first->contents,use.buffer->_wrapped,entry.second);}command->_shadows.capture(command->_queue->_shadowPool);
- fuxi::ShadowIndexCache cache;uint64_t scanned=0;for(const auto &op:command->_ops)if(op.pipeline)trackShadowDraw(command,op,cache,scanned);
+ fuxi::ShadowIndexCache cache;uint64_t scanned=0;for(const auto &op:command->_ops)if(op.pipeline && !op.compute)trackShadowDraw(command,op,cache,scanned);
  if(trace){trace->shadowScannedIndices+=scanned;for(auto &entry:command->_shadowUses){auto &use=entry.second;for(size_t i=0;i<trace->shadowFullReasons.size();++i)trace->shadowFullReasons[i]+=use.ranges.fullReason(fuxi::ShadowFullReason(i));
   if(use.textureUses)trace->textureShadowBytes+=use.ranges.bytes();for(size_t i=0;i<trace->textureShadowUses.size();++i)trace->textureShadowUses[i]+=bool(use.textureUses&(1u<<i));}}
 }
@@ -1235,6 +1241,13 @@ static NSString *renderPassText(MTLRenderPassDescriptor *d){
 - (id)blitCommandEncoder {FRONTEND_TIME(self);FUXI_PHASE(blit);CENSUS();
  if(_rejected || _status!=MTLCommandBufferStatusNotEnqueued || _encoding) {unsupported(self,_cmd);return nil;}
  FuxiBlit *e=[FuxiBlit new];e->_command=[self retain];_encoding=YES;return [e autorelease];
+}
+- (id)computeCommandEncoder {FRONTEND_TIME(self);FUXI_PHASE(encBegin);CENSUS();
+ if(_rejected || _status!=MTLCommandBufferStatusNotEnqueued || _encoding) {unsupported(self,_cmd);return nil;}
+ FuxiCompute *e=[FuxiCompute new];e->_state={};e->_state.encoderID=++_renderEncoderID;e->_command=[self retain];_encoding=YES;return [e autorelease];
+}
+- (id)computeCommandEncoderWithDispatchType:(MTLDispatchType)t {FRONTEND_TIME(self);FUXI_PHASE(encBegin);CENSUS();
+ if(t>MTLDispatchTypeConcurrent){unsupported(self,_cmd);return nil;}return [self computeCommandEncoder];
 }
 - (id)refusedRender {if(!_rejected)[self rejectSelector:@selector(renderCommandEncoderWithDescriptor:)];FuxiRefusedRender *e=[FuxiRefusedRender new];e->_command=[self retain];return [e autorelease];}
 - (id)renderCommandEncoderWithDescriptor:(MTLRenderPassDescriptor *)d {FRONTEND_TIME(self);FUXI_PHASE(encBegin);@try {CENSUS();
@@ -1558,6 +1571,76 @@ static NSString *renderPassText(MTLRenderPassDescriptor *d){
 // Protected content is unsupported: only the "none" option is accepted.
 - (NSUInteger)protectionOptions {FRONTEND_TIME(self);CENSUS();return 0;}
 - (void)setProtectionOptions:(NSUInteger)o {FRONTEND_TIME(self);CENSUS();if(o)[self rejectSelector:_cmd];}
+@end
+@implementation FuxiCompute
+- (void)rejectSelector:(SEL)s {FRONTEND_TIME(_command);unsupported(self,s);[_command rejectSelector:s];}
+- (void)dealloc {[_pipeline release];[_command release];[super dealloc];}
+- (id)device {FRONTEND_TIME(_command);FUXI_PHASE(newOther);CENSUS();return _command->_queue->_device;}
+- (void)active {FRONTEND_TIME(_command);stage4Require("computeEncoder","ended",_ended,!_ended);stage4Require("computeEncoder","encoding",_command->_encoding,_command->_encoding);
+ stage4Require("computeEncoder","commandStatus",_command->_status,_command->_status==MTLCommandBufferStatusNotEnqueued);}
+- (void)setComputePipelineState:(id)p {FRONTEND_TIME(_command);FUXI_PHASE(pipeline);@try {CENSUS();[self active];
+ if(p && p==_pipeline && object_getClass(p)==[FuxiPipeline class])return;
+ if(!p){[_pipeline release];_pipeline=nil;_state.pipeline=nullptr;return;}
+ if(!stage4Class("computeEncoder","pipeline.class",p,[FuxiPipeline class]))invalid(@"computeEncoder pipeline.class");
+ stage4Require("computeEncoder","pipeline.device",(uint64_t)[p device],[p device]==_command->_queue->_device);
+ if(!((FuxiPipeline *)p)->_compute)invalid(@"computeEncoder pipeline.kind");
+ [p retain];[_pipeline release];_pipeline=p;_state.pipeline=((FuxiPipeline *)p)->_pipeline;
+} @catch(NSException *e) {(void)e;[self rejectSelector:_cmd];}}
+- (void)bindBuffer:(id)b offset:(NSUInteger)o index:(NSUInteger)i bytes:(BOOL)bytes {FRONTEND_TIME(_command);FUXI_PHASE(bufBytes);[self active];
+ if(i>=fuxi::resourceSlots || (b && (![b isKindOfClass:[FuxiBuffer class]] || [b device]!=_command->_queue->_device || o>=[b length])))invalid(@"computeEncoder buffer slot/device/offset");
+ if(b)retainCommandResource(_command,b,false);_state.buffers[0][i]={b?((FuxiBuffer *)b)->_buffer:nullptr,o,(bool)bytes};
+}
+- (void)setBuffer:(id)b offset:(NSUInteger)o atIndex:(NSUInteger)i {FRONTEND_TIME(_command);FUXI_PHASE(bufBytes);@try {CENSUS();[self bindBuffer:b offset:o index:i bytes:NO];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setBuffer:(id)b offset:(NSUInteger)o attributeStride:(NSUInteger)stride atIndex:(NSUInteger)i {FRONTEND_TIME(_command);(void)stride;@try {CENSUS();[self bindBuffer:b offset:o index:i bytes:NO];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setBytes:(const void *)bytes length:(NSUInteger)n atIndex:(NSUInteger)i {FRONTEND_TIME(_command);FUXI_PHASE(bufBytes);@try {CENSUS();[self active];
+ if(!bytes || !n || n>4096 || i>=fuxi::resourceSlots)invalid(@"computeEncoder inline bytes bound");
+ auto slice=_command->_uploads.copyOffsetZero(bytes,n,_command->_queue->_uploadStorage,[&](size_t capacity){FuxiBuffer *b=[FuxiBuffer new];b->_device=[_command->_queue->_device retain];try{b->_buffer=owner(b->_device)->backend->allocate(capacity);b->_buffer->upload=true;}catch(...){[b release];throw;}return b;},[](FuxiBuffer *b){return b->_buffer->contents;});
+ [self bindBuffer:slice.handle offset:slice.offset index:i bytes:YES];_state.buffers[0][i].end=slice.offset+slice.length;
+} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setBytes:(const void *)bytes length:(NSUInteger)n attributeStride:(NSUInteger)stride atIndex:(NSUInteger)i {FRONTEND_TIME(_command);(void)stride;@try {CENSUS();[self setBytes:bytes length:n atIndex:i];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setTexture:(id)t atIndex:(NSUInteger)i {FRONTEND_TIME(_command);FUXI_PHASE(texSamp);@try {CENSUS();[self active];
+ if(i>=fuxi::resourceSlots)invalid(@"computeEncoder texture slot");
+ if(!t){_state.samples[i]=nullptr;return;}
+ if(!stage4Class("computeEncoder","texture.class",t,[FuxiTexture class]))invalid(@"computeEncoder texture.class");
+ stage4Require("computeEncoder","texture.device",(uint64_t)[t device],[t device]==_command->_queue->_device);
+ auto *texture=(FuxiTexture *)t;if(texture->_usage && !(texture->_usage&(MTLTextureUsageShaderRead|MTLTextureUsageShaderWrite)))invalid(@"computeEncoder texture usage");
+ bool sampled=!(texture->_usage&MTLTextureUsageShaderWrite);retainCommandTexture(_command,texture,sampled);_state.samples[i]=texture->_texture;_state.sampleBase[i]=texture->_baseLevel;_state.sampleCount[i]=(uint32_t)[texture mipmapLevelCount];
+} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setSamplerState:(id)s atIndex:(NSUInteger)i {FRONTEND_TIME(_command);FUXI_PHASE(texSamp);@try {CENSUS();[self active];
+ if(i>=fuxi::resourceSlots)invalid(@"computeEncoder sampler slot");
+ if(!s){_state.samplers[i]=nullptr;return;}
+ if(!stage4Class("computeEncoder","sampler.class",s,[FuxiSampler class]))invalid(@"computeEncoder sampler.class");
+ stage4Require("computeEncoder","sampler.device",(uint64_t)[s device],[s device]==_command->_queue->_device);
+ retainCommandResource(_command,s);_state.samplers[i]=((FuxiSampler *)s)->_sampler;
+} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)setSamplerState:(id)s lodMinClamp:(float)min lodMaxClamp:(float)max atIndex:(NSUInteger)i {FRONTEND_TIME(_command);@try {CENSUS();if(!std::isfinite(min) || !std::isfinite(max) || min<0 || max<min)invalid(@"computeEncoder sampler lod");[self setSamplerState:s atIndex:i];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)dispatchThreadgroups:(MTLSize)groups threadsPerThreadgroup:(MTLSize)threads {FRONTEND_TIME(_command);FUXI_PHASE(draw);@try {CENSUS();[self active];
+ if(!_state.pipeline)invalid(@"computeEncoder pipeline unset");
+ if(!groups.width || !groups.height || !groups.depth || !threads.width || !threads.height || !threads.depth)invalid(@"computeEncoder dispatch bounds");
+ if(groups.width>UINT32_MAX || groups.height>UINT32_MAX || groups.depth>UINT32_MAX)invalid(@"computeEncoder group count");
+ uint64_t total=(uint64_t)threads.width*threads.height*threads.depth;uint32_t limit=_pipeline->_pipeline->computeRecipe.maxThreads;
+ if(total>1024 || (limit && total>limit))invalid(@"computeEncoder threadgroup size");
+ _state.compute=true;_state.computeGroups[0]=(uint32_t)groups.width;_state.computeGroups[1]=(uint32_t)groups.height;_state.computeGroups[2]=(uint32_t)groups.depth;
+ _state.computeThreads[0]=(uint32_t)threads.width;_state.computeThreads[1]=(uint32_t)threads.height;_state.computeThreads[2]=(uint32_t)threads.depth;
+ _command->_ops.push_back(_state);_state.compute=false;
+} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)dispatchThreads:(MTLSize)threads threadsPerThreadgroup:(MTLSize)group {FRONTEND_TIME(_command);FUXI_PHASE(draw);@try {CENSUS();[self active];
+ if(!threads.width || !threads.height || !threads.depth || !group.width || !group.height || !group.depth)invalid(@"computeEncoder thread count");
+ MTLSize groups=MTLSizeMake((threads.width+group.width-1)/group.width,(threads.height+group.height-1)/group.height,(threads.depth+group.depth-1)/group.depth);
+ [self dispatchThreadgroups:groups threadsPerThreadgroup:group];
+} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)dispatchThreadgroupsWithIndirectBuffer:(id)indirectBuffer indirectBufferOffset:(NSUInteger)offset threadsPerThreadgroup:(MTLSize)threads {FRONTEND_TIME(_command);(void)indirectBuffer;(void)offset;(void)threads;[self rejectSelector:_cmd];}
+- (void)setThreadgroupMemoryLength:(NSUInteger)length atIndex:(NSUInteger)index {FRONTEND_TIME(_command);(void)length;(void)index;[self rejectSelector:_cmd];}
+- (void)setImageblockWidth:(NSUInteger)width height:(NSUInteger)height {FRONTEND_TIME(_command);(void)width;(void)height;[self rejectSelector:_cmd];}
+- (void)useResource:(id)resource usage:(MTLResourceUsage)usage {FRONTEND_TIME(_command);(void)usage;@try {CENSUS();[self active];if(resource)retainCommandResource(_command,resource,true);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)useResources:(const id __unsafe_unretained [])resources count:(NSUInteger)count usage:(MTLResourceUsage)usage {FRONTEND_TIME(_command);(void)usage;@try {CENSUS();[self active];if(count && !resources)invalid(@"computeEncoder resources");for(NSUInteger i=0;i<count;++i)if(resources[i])retainCommandResource(_command,resources[i],true);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)useHeap:(id)heap {FRONTEND_TIME(_command);@try {CENSUS();[self active];if(heap)retainCommandResource(_command,heap);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)useHeaps:(const id __unsafe_unretained [])heaps count:(NSUInteger)count {FRONTEND_TIME(_command);@try {CENSUS();[self active];if(count && !heaps)invalid(@"computeEncoder heaps");for(NSUInteger i=0;i<count;++i)if(heaps[i])retainCommandResource(_command,heaps[i]);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)memoryBarrierWithScope:(MTLBarrierScope)scope {FRONTEND_TIME(_command);(void)scope;@try {CENSUS();[self active];} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)memoryBarrierWithResources:(const id __unsafe_unretained [])resources count:(NSUInteger)count {FRONTEND_TIME(_command);@try {CENSUS();[self active];if(count && !resources)invalid(@"computeEncoder barrier resources");} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)updateFence:(id<MTLFence>)f {FRONTEND_TIME(_command);@try {CENSUS();[self active];if(!f || ![f isKindOfClass:[FuxiFence class]] || [f device]!=_command->_queue->_device)invalid(@"computeEncoder fence");retainCommandResource(_command,f);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)waitForFence:(id<MTLFence>)f {FRONTEND_TIME(_command);@try {CENSUS();[self active];if(!f || ![f isKindOfClass:[FuxiFence class]] || [f device]!=_command->_queue->_device)invalid(@"computeEncoder fence");retainCommandResource(_command,f);} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
+- (void)endEncoding {FRONTEND_TIME(_command);FUXI_PHASE(encEnd);@try {CENSUS();[self active];_ended=YES;_command->_encoding=NO;} @catch(NSException *e){(void)e;[self rejectSelector:_cmd];}}
 @end
 @implementation FuxiBlit
 - (void)rejectSelector:(SEL)s {FRONTEND_TIME(_command);unsupported(self,s);[_command rejectSelector:s];}
@@ -1965,15 +2048,26 @@ static bool fuxiAddressMode(MTLSamplerAddressMode m) {return m==MTLSamplerAddres
  if(options!=MTLPipelineOptionNone)return metalError(error,"pipeline reflection/archive options deferred");
  return [self newRenderPipelineStateWithDescriptor:d error:error];
 }
-// The bounded frontend has no compute translator/encoder. Return the same
-// explicit error through every synchronous and completion-handler entry point.
-- (id)newComputePipelineStateWithFunction:(id<MTLFunction>)function error:(NSError **)error {CENSUS();FUXI_PHASE(newOther);(void)function;
- return metalError(error,"compute pipelines deferred");
+// Compute lane: one kernel translation per pipeline; dispatch specializations
+// are created lazily by the backend from the encoder's threadgroup size.
+- (id)newComputePipelineStateWithFunction:(id<MTLFunction>)function error:(NSError **)error {CENSUS();FUXI_PHASE(newOther);
+ if(error)*error=nil;if(clientMode==fuxi::ClientMode::census)return nil;
+ if(!stage4Class("compute","function.class",function,[FuxiFunction class]))return metalError(error,"compute function.class");
+ FuxiFunction *f=(FuxiFunction *)function;
+ if(f->_stage!=3)return metalError(error,"compute pipeline requires a kernel function");
+ FuxiPipeline *p=[FuxiPipeline new];p->_descriptorText=[[NSString stringWithFormat:@"compute function=%@",f->_name] copy];p->_device=[self retain];p->_compute=YES;
+ try {fuxi::CompileOptions o{};NSData *constants=f->_constants;o.constantCount[0]=(uint32_t)(constants.length/sizeof(fuxi::Constant));if(o.constantCount[0]>fuxi::maxFunctionConstants)throw std::runtime_error("constants bound");if(constants.length)memcpy(o.constants[0],constants.bytes,constants.length);p->_pipeline=owner(self)->backend->compileComputePipeline(f->_library->_library,f->_name.UTF8String,o);}
+ catch(const std::exception &e) {[p release];return surveyPipeline(metalError(error,e.what()),error,self);}
+ if(!p->_pipeline || !p->_pipeline->computeTranslation){[p release];return metalError(error,"compute pipeline translation missing");}
+ return p;
 }
-- (id)newComputePipelineStateWithFunction:(id<MTLFunction>)function options:(MTLPipelineOption)options reflection:(MTLComputePipelineReflection **)reflection error:(NSError **)error {CENSUS();FUXI_PHASE(newOther);(void)options;
- if(reflection)*reflection=nil;return [self newComputePipelineStateWithFunction:function error:error];
+- (id)newComputePipelineStateWithFunction:(id<MTLFunction>)function options:(MTLPipelineOption)options reflection:(MTLComputePipelineReflection **)reflection error:(NSError **)error {CENSUS();FUXI_PHASE(newOther);
+ if(reflection)*reflection=nil;
+ if(options!=MTLPipelineOptionNone)return metalError(error,"pipeline reflection/archive options deferred");
+ return [self newComputePipelineStateWithFunction:function error:error];
 }
 - (id)newComputePipelineStateWithDescriptor:(MTLComputePipelineDescriptor *)d options:(MTLPipelineOption)options reflection:(MTLComputePipelineReflection **)reflection error:(NSError **)error {CENSUS();FUXI_PHASE(newOther);
+ if(!d)return metalError(error,"compute descriptor absent");
  return [self newComputePipelineStateWithFunction:d.computeFunction options:options reflection:reflection error:error];
 }
 // Default remains inline for the existing RenderBox/CI compatibility path.
@@ -2067,7 +2161,7 @@ __attribute__((constructor)) static void registerResources() {
  for(auto entry: {std::pair<Class,const char *>{[FuxiBuffer class],"MTLBuffer"},
       {[FuxiHeap class],"MTLHeap"},{[FuxiEvent class],"MTLEvent"},{[FuxiSharedEvent class],"MTLSharedEvent"},{[FuxiFence class],"MTLFence"},{[FuxiDepthStencil class],"MTLDepthStencilState"},
       {[FuxiQueue class],"MTLCommandQueue"},{[FuxiCommandBuffer class],"MTLCommandBuffer"},{[FuxiBlit class],"MTLBlitCommandEncoder"},{[FuxiRender class],"MTLRenderCommandEncoder"},
-      {[FuxiSampler class],"MTLSamplerState"},{[FuxiTexture class],"MTLTexture"},{[FuxiLibrary class],"MTLLibrary"},{[FuxiFunction class],"MTLFunction"},{[FuxiPipeline class],"MTLRenderPipelineState"}}) {
+      {[FuxiCompute class],"MTLComputeCommandEncoder"},{[FuxiSampler class],"MTLSamplerState"},{[FuxiTexture class],"MTLTexture"},{[FuxiLibrary class],"MTLLibrary"},{[FuxiFunction class],"MTLFunction"},{[FuxiPipeline class],"MTLRenderPipelineState"},{[FuxiPipeline class],"MTLComputePipelineState"}}) {
   Protocol *p=objc_getProtocol(entry.second);rejectProtocol(entry.first,p);if(p)class_addProtocol(entry.first,p);
  }
 }
