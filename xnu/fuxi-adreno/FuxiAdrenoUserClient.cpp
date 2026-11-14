@@ -488,7 +488,12 @@ class FuxiAdrenoUserClient : public IOUserClient {
    uint64_t tMap=mach_absolute_time(), tTry;
    do {
     tTry=mach_absolute_time();
-    s=b->importMemory ? fuxi_gpu_abi_map_import(r.iova,b->importMap->getVirtualAddress(),b->bytes,(b->importRo ? r.permissions&~2u : r.permissions)|gpuOnly) :
+    /* Keep the caller's GPU PTE permissions even for a read-only CPU import.
+     * importRo only protects the kernel's CPU alias (kIOMapReadOnly); masking
+     * the write bit here made every later BoMap(permissions=3) of such a BO
+     * read-only on the GPU, so GPU writes to imported buffers were dropped
+     * (the r195 blank-screen regression). */
+    s=b->importMemory ? fuxi_gpu_abi_map_import(r.iova,b->importMap->getVirtualAddress(),b->bytes,r.permissions|gpuOnly) :
         fuxi_gpu_abi_map(r.iova,(uintptr_t)b->memory->getBytesNoCopy(),b->bytes,r.permissions,r.writeback,r.shareability);
     if (s!=1 || mach_absolute_time()>=deadline) break;
     abiPause();
