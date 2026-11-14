@@ -399,7 +399,10 @@ class FuxiAdrenoUserClient : public IOUserClient {
    if (!memory) return refuse(4,kIOReturnNoMemory,detail);
    ro=true; probe=detail|8;
   }
-  if (memory->prepare(ro ? kIODirectionOut : kIODirectionInOut)!=kIOReturnSuccess) { memory->release(); return refuse(5,kIOReturnBadArgument,probe); }
+  /* A read-only CPU alias still needs a write-capable DMA preparation: the GPU
+   * writes through the SMMU PTE, and prepare(Out) only wires the descriptor for
+   * device reads (kIOMemoryPreparedReadOnly), which makes such writes fault. */
+  if (memory->prepare(kIODirectionInOut)!=kIOReturnSuccess) { memory->release(); return refuse(5,kIOReturnBadArgument,probe); }
   bool valid=memory->getLength()==r.bytes;
   uint64_t why=valid ? 0 : (6ULL<<56);
   /* One segment lookup per physical run (UniXNU Adreno740 pattern); the cache-class predicate stays per 16K page. */
