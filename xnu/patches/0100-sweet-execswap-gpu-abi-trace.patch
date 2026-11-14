@@ -580,7 +580,7 @@
    out.handle=b->handle;
    return kIOReturnSuccess;
   }
-@@ -144,51 +366,97 @@
+@@ -144,51 +366,100 @@
    * COW resolution, before wiring. Never translate a user VA with kernel_pmap,
    * change its WIMG/cache mode, or manufacture a physical descriptor alias. */
   IOReturn importHost(const NativeAdrenoAbiBoImport &r, NativeAdrenoAbiBoAllocReply &out) {
@@ -624,7 +624,10 @@
 +   if (!memory) return refuse(4,kIOReturnNoMemory,detail);
 +   ro=true; probe=detail|8;
 +  }
-+  if (memory->prepare(ro ? kIODirectionOut : kIODirectionInOut)!=kIOReturnSuccess) { memory->release(); return refuse(5,kIOReturnBadArgument,probe); }
++  /* A read-only CPU alias still needs a write-capable DMA preparation: the GPU
++   * writes through the SMMU PTE, and prepare(Out) only wires the descriptor for
++   * device reads (kIOMemoryPreparedReadOnly), which makes such writes fault. */
++  if (memory->prepare(kIODirectionInOut)!=kIOReturnSuccess) { memory->release(); return refuse(5,kIOReturnBadArgument,probe); }
    bool valid=memory->getLength()==r.bytes;
 -  for (uint64_t off=0;valid && off<r.bytes;off+=NativeAdrenoAbiHostPageBytes) {
 +  uint64_t why=valid ? 0 : (6ULL<<56);
@@ -697,7 +700,7 @@
    }
    if (method==NativeAdrenoMethodBoCpuUnmap) {
     const auto &r=*static_cast<const NativeAdrenoAbiBoCpuUnmap *>(in);
-@@ -210,16 +478,31 @@
+@@ -210,16 +481,31 @@
    if (method==NativeAdrenoMethodBoMap) {
     const auto &r=*static_cast<const NativeAdrenoAbiBoMap *>(in);
     Bo *b=find(r.handle);
@@ -732,7 +735,7 @@
     if (s) return s==1 ? kIOReturnBusy : kIOReturnBadArgument;
     b->iova=r.iova; static_cast<NativeAdrenoAbiBoMapReply *>(out)->iova=r.iova; return kIOReturnSuccess;
    }
-@@ -231,22 +514,53 @@
+@@ -231,22 +517,53 @@
    }
    if (method==NativeAdrenoMethodSubmit) {
     const auto &r=*static_cast<const NativeAdrenoAbiSubmit *>(in);
@@ -797,7 +800,7 @@
     }
    }
    if (method==NativeAdrenoMethodSetMetadata || method==NativeAdrenoMethodGetMetadata) {
-@@ -254,8 +568,9 @@
+@@ -254,8 +571,9 @@
     if (!b || r.reserved || r.bytes>64) return kIOReturnBadArgument;
     if (method==NativeAdrenoMethodSetMetadata) { bcopy(r.text,b->metadata,r.bytes); b->metadataBytes=r.bytes; }
     else {
@@ -808,7 +811,7 @@
      bcopy(b->metadata,reply.text,reply.bytes);
     }
     return kIOReturnSuccess;
-@@ -277,34 +592,58 @@
+@@ -277,34 +595,58 @@
   bool initWithTask(task_t task, void *securityID, UInt32 type) override {
    if (!IOUserClient::initWithTask(task,securityID,type)) return false;
    task_=task; task_reference(task_);
@@ -875,7 +878,7 @@
   }
   IOReturn clientClose() override {
    if (!lock_) return kIOReturnSuccess;
-@@ -321,24 +660,40 @@
+@@ -321,24 +663,40 @@
     IOLockLock(openLock); connected=false; IOLockUnlock(openLock);
    }
    IOLockUnlock(lock_);
@@ -919,7 +922,7 @@
    if (!handler) return kIOReturnBadArgument;
    *handler=nullptr;
    if (type!=0x4147 && type!=0) return kIOReturnUnsupported;
-@@ -351,10 +706,92 @@
+@@ -351,10 +709,92 @@
    *handler=uc; return kIOReturnSuccess;
   }
  };
@@ -1014,7 +1017,7 @@
   auto *service=new NativeAdrenoGpuPublished;
   if (!openLock || !service) { if (service) service->release(); return; }
   if (!service->init() || !service->attach(IOService::getPlatform()) || !service->start(IOService::getPlatform())) {
-@@ -362,7 +799,29 @@
+@@ -362,7 +802,29 @@
   }
   service->setName("NativeAdrenoGpu");
   service->setProperty("NativeAdrenoABI",(uint64_t)NativeAdrenoAbiVersion,32);
