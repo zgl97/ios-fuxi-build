@@ -697,7 +697,7 @@
    }
    if (method==NativeAdrenoMethodBoCpuUnmap) {
     const auto &r=*static_cast<const NativeAdrenoAbiBoCpuUnmap *>(in);
-@@ -210,16 +478,26 @@
+@@ -210,16 +478,31 @@
    if (method==NativeAdrenoMethodBoMap) {
     const auto &r=*static_cast<const NativeAdrenoAbiBoMap *>(in);
     Bo *b=find(r.handle);
@@ -713,7 +713,12 @@
     do {
 -    s=b->importMemory ? fuxi_gpu_abi_map_import(r.iova,b->importMap->getVirtualAddress(),b->bytes,r.permissions) :
 +    tTry=mach_absolute_time();
-+    s=b->importMemory ? fuxi_gpu_abi_map_import(r.iova,b->importMap->getVirtualAddress(),b->bytes,(b->importRo ? r.permissions&~2u : r.permissions)|gpuOnly) :
++    /* Keep the caller's GPU PTE permissions even for a read-only CPU import.
++     * importRo only protects the kernel's CPU alias (kIOMapReadOnly); masking
++     * the write bit here made every later BoMap(permissions=3) of such a BO
++     * read-only on the GPU, so GPU writes to imported buffers were dropped
++     * (the r195 blank-screen regression). */
++    s=b->importMemory ? fuxi_gpu_abi_map_import(r.iova,b->importMap->getVirtualAddress(),b->bytes,r.permissions|gpuOnly) :
          fuxi_gpu_abi_map(r.iova,(uintptr_t)b->memory->getBytesNoCopy(),b->bytes,r.permissions,r.writeback,r.shareability);
      if (s!=1 || mach_absolute_time()>=deadline) break;
 -    IOSleep(1);
@@ -727,7 +732,7 @@
     if (s) return s==1 ? kIOReturnBusy : kIOReturnBadArgument;
     b->iova=r.iova; static_cast<NativeAdrenoAbiBoMapReply *>(out)->iova=r.iova; return kIOReturnSuccess;
    }
-@@ -231,22 +509,53 @@
+@@ -231,22 +514,53 @@
    }
    if (method==NativeAdrenoMethodSubmit) {
     const auto &r=*static_cast<const NativeAdrenoAbiSubmit *>(in);
@@ -792,7 +797,7 @@
     }
    }
    if (method==NativeAdrenoMethodSetMetadata || method==NativeAdrenoMethodGetMetadata) {
-@@ -254,8 +563,9 @@
+@@ -254,8 +568,9 @@
     if (!b || r.reserved || r.bytes>64) return kIOReturnBadArgument;
     if (method==NativeAdrenoMethodSetMetadata) { bcopy(r.text,b->metadata,r.bytes); b->metadataBytes=r.bytes; }
     else {
@@ -803,7 +808,7 @@
      bcopy(b->metadata,reply.text,reply.bytes);
     }
     return kIOReturnSuccess;
-@@ -277,34 +587,58 @@
+@@ -277,34 +592,58 @@
   bool initWithTask(task_t task, void *securityID, UInt32 type) override {
    if (!IOUserClient::initWithTask(task,securityID,type)) return false;
    task_=task; task_reference(task_);
@@ -870,7 +875,7 @@
   }
   IOReturn clientClose() override {
    if (!lock_) return kIOReturnSuccess;
-@@ -321,24 +655,40 @@
+@@ -321,24 +660,40 @@
     IOLockLock(openLock); connected=false; IOLockUnlock(openLock);
    }
    IOLockUnlock(lock_);
@@ -914,7 +919,7 @@
    if (!handler) return kIOReturnBadArgument;
    *handler=nullptr;
    if (type!=0x4147 && type!=0) return kIOReturnUnsupported;
-@@ -351,10 +701,92 @@
+@@ -351,10 +706,92 @@
    *handler=uc; return kIOReturnSuccess;
   }
  };
@@ -1009,7 +1014,7 @@
   auto *service=new NativeAdrenoGpuPublished;
   if (!openLock || !service) { if (service) service->release(); return; }
   if (!service->init() || !service->attach(IOService::getPlatform()) || !service->start(IOService::getPlatform())) {
-@@ -362,7 +794,29 @@
+@@ -362,7 +799,29 @@
   }
   service->setName("NativeAdrenoGpu");
   service->setProperty("NativeAdrenoABI",(uint64_t)NativeAdrenoAbiVersion,32);
