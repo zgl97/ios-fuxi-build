@@ -666,7 +666,7 @@
  };
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
-@@ -174,6 +385,399 @@
+@@ -174,6 +385,404 @@
  OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
  #if defined(FUXI)
  extern "C" void fuxi_display_kick(void);
@@ -785,7 +785,7 @@
 +	const uint32_t hTotal = width + 75;
 +	const uint32_t vTotal = height + 24;
 +	const uint32_t refresh = 120;
-+	const uint64_t lineKHz16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
++	const uint64_t syncRate16 = ((uint64_t)height * refresh) << 16;
 +
 +	OSDictionary *attrs = OSDictionary::withCapacity(13);
 +	OSDictionary *product = OSDictionary::withCapacity(6);
@@ -875,12 +875,12 @@
 +	ok = ok && sweet_fb_put_num(hAttrs, "Total", hTotal, 32) &&
 +	    sweet_fb_put_num(hAttrs, "Active", width, 32) &&
 +	    sweet_fb_put_num(hAttrs, "PixelRepetition", 0, 32) &&
-+	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", lineKHz16, 32) &&
++	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", syncRate16, 32) &&
 +	    sweet_fb_put_num(hAttrs, "BackPorch", 20, 32) &&
 +	    sweet_fb_put_num(hAttrs, "SyncWidth", 10, 32) &&
 +	    sweet_fb_put_num(hAttrs, "FrontPorch", 45, 32) &&
 +	    sweet_fb_put_num(hAttrs, "SyncPolarity", 1, 32) &&
-+	    sweet_fb_put_num(hAttrs, "SyncRate", ((uint64_t)(vTotal * refresh / 1000)) << 16, 32);
++	    sweet_fb_put_num(hAttrs, "SyncRate", syncRate16, 32);
 +	ok = ok && sweet_fb_put_num(vAttrs, "Total", vTotal, 32) &&
 +	    sweet_fb_put_num(vAttrs, "Active", height, 32) &&
 +	    sweet_fb_put_num(vAttrs, "PixelRepetition", 0, 32) &&
@@ -899,6 +899,11 @@
 +	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 +	    timingElement->setObject("VerticalAttributes", vAttrs) &&
 +	    timingElement->setObject("ColorModes", colorModes) &&
++	    sweet_fb_put_num(timingElement, "TimingStandard", 4, 32) &&
++	    sweet_fb_put_num(timingElement, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
++	    sweet_fb_put_num(timingElement, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
++	    timingElement->setObject("IsPreferred", kOSBooleanTrue) &&
++	    timingElement->setObject("IsOverscanned", kOSBooleanFalse) &&
 +	    sweet_fb_put_num(timingElement, "StandardType", 2, 32) &&
 +	    sweet_fb_put_num(timingElement, "ElementType", 0, 32) &&
 +	    sweet_fb_put_num(timingElement, "ID", 1000, 32) &&
@@ -1066,7 +1071,7 @@
  #endif
  
  bool
-@@ -214,7 +818,33 @@
+@@ -214,7 +823,33 @@
  		OSSafeReleaseNULL(fWorkLoop);
  		return false;
  	}
@@ -1101,7 +1106,7 @@
  	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
  		IOLog("SWEET FB: no vsync timer\n");
  		return false;
-@@ -227,11 +857,20 @@
+@@ -227,11 +862,20 @@
  	PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
  	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
  #if defined(FUXI)
@@ -1124,7 +1129,7 @@
  #else
  	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
  #endif
-@@ -239,28 +878,154 @@
+@@ -239,28 +883,154 @@
  	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
@@ -1285,7 +1290,7 @@
  #else
  	(void)fb;
  	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
-@@ -272,44 +1037,34 @@
+@@ -272,44 +1042,34 @@
  {
  	AppleCLCD *fb = (AppleCLCD *)owner;
  	uint64_t now = mach_absolute_time();
@@ -1348,7 +1353,7 @@
  	if (fb->fPowerOff) {
  		/* Fade out: halve every channel each vsync, then black, then idle. */
  		uint32_t step = fb->fFadeStep;
-@@ -319,14 +1074,22 @@
+@@ -319,14 +1079,22 @@
  		IOLockUnlock(fb->fLock);
  #if defined(FUXI)
  		if (step == 0) {
@@ -1376,7 +1381,7 @@
  		}
  #else
  		if (step <= 6) {
-@@ -341,20 +1104,13 @@
+@@ -341,20 +1109,13 @@
  		sweet_fb_rearm(fb, sender);
  		return;
  	}
@@ -1404,7 +1409,7 @@
  	sweet_fb_rearm(fb, sender);
  }
  
-@@ -388,38 +1144,356 @@
+@@ -388,38 +1149,356 @@
  static uint32_t sweet_fb_swaps_logged;
  static uint64_t sweet_fb_swap_count;
  
@@ -1787,7 +1792,7 @@
  
  	if (!fConsolePaused) {
  		int quiet = 0;
-@@ -442,7 +1516,7 @@
+@@ -442,7 +1521,7 @@
  		if (!(mask & (1u << layer)) || id == 0) {
  			continue;
  		}
@@ -1796,7 +1801,7 @@
  		if (sweet_fb_swaps_logged < 16) {
  			sweet_fb_swaps_logged++;
  			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
-@@ -451,6 +1525,7 @@
+@@ -451,6 +1530,7 @@
  			    get32(a, 12), dx, dy, w, h);
  		}
  		if (s == NULL || s == fSurface) {
@@ -1804,7 +1809,7 @@
  			OSSafeReleaseNULL(s);
  			continue;
  		}
-@@ -500,35 +1575,262 @@
+@@ -500,35 +1580,262 @@
  		if (src != 0 && bpe == 4) {
  			int copied = 0;
  #if defined(FUXI)
@@ -2075,7 +2080,7 @@
  	fStatCopy += took;
  	fStatCopyMax = took > fStatCopyMax ? took : fStatCopyMax;
  	if (++fStatFrames >= 600) {
-@@ -538,15 +1840,47 @@
+@@ -538,15 +1845,47 @@
  		absolutetime_to_nanoseconds(t1 - fStatStart, &span_ns);
  		IOLockLock(fLock);
  		uint32_t swaps = fStatSwaps, dropped = fStatDropped;
@@ -2126,7 +2131,7 @@
  		sweet_surface_gpu_stats(&split);
  		uint64_t ticks[] = {split.pin, split.lookup, split.map, split.clean,
  		    split.submit, split.wait, split.unmap, split.cpu};
-@@ -557,13 +1891,21 @@
+@@ -557,13 +1896,21 @@
  			absolutetime_to_nanoseconds(ticks[i], &ns);
  			us[i] = attempts ? ns / 1000 / attempts : 0;
  		}
@@ -2151,7 +2156,7 @@
  		fGpuBusyTicks = fGpuFailed = 0;
  		fGpuFrames = fCpuFrames = 0;
  		fGpuTime = fCpuTime = 0;
-@@ -571,6 +1913,74 @@
+@@ -571,6 +1918,74 @@
  		fStatCopy = fStatCopyMax = 0;
  		fStatStart = t1;
  	}
@@ -2226,7 +2231,7 @@
  #endif
  }
  
-@@ -620,6 +2030,7 @@
+@@ -620,6 +2035,7 @@
  	IOLockLock(fFB->fLock);
  	old = fPort;
  	fPort = port;
@@ -2234,7 +2239,7 @@
  	IOLockUnlock(fFB->fLock);
  	if (old != MACH_PORT_NULL) {
  		releaseNotificationPort(old);
-@@ -643,6 +2054,40 @@
+@@ -643,6 +2059,40 @@
  }
  
  static uint64_t sweet_fb_logged;        /* selectors already logged (< 64) */
@@ -2275,7 +2280,7 @@
  
  IOReturn
  IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
-@@ -660,7 +2105,7 @@
+@@ -660,7 +2110,7 @@
  		break;
  	case kSweetFBSwapBegin:
  		IOLockLock(fFB->fLock);
@@ -2284,7 +2289,7 @@
  		IOLockUnlock(fFB->fLock);
  		outCount = 1;
  		break;
-@@ -672,7 +2117,7 @@
+@@ -672,7 +2122,7 @@
  			break;
  		}
  		memcpy(rec, args->structureInput, sizeof(rec));
@@ -2293,7 +2298,7 @@
  		break;
  	}
  	case kSweetFBGetID:
-@@ -698,6 +2143,7 @@
+@@ -698,6 +2148,7 @@
  			IOLockLock(fFB->fLock);
  			fFunc[type] = args->scalarInput[0];
  			fRefcon[type] = args->scalarInput[1];
@@ -2301,7 +2306,7 @@
  			IOLockUnlock(fFB->fLock);
  			char name[32];
  			proc_selfname(name, sizeof(name));
-@@ -707,19 +2153,13 @@
+@@ -707,19 +2158,13 @@
  		break;
  	case kSweetFBRequestPowerChange:
  		if (args->scalarInputCount >= 1) {

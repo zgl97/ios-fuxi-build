@@ -500,7 +500,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	const uint32_t hTotal = width + 75;
 	const uint32_t vTotal = height + 24;
 	const uint32_t refresh = 120;
-	const uint64_t lineKHz16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
+	const uint64_t syncRate16 = ((uint64_t)height * refresh) << 16;
 
 	OSDictionary *attrs = OSDictionary::withCapacity(13);
 	OSDictionary *product = OSDictionary::withCapacity(6);
@@ -590,12 +590,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && sweet_fb_put_num(hAttrs, "Total", hTotal, 32) &&
 	    sweet_fb_put_num(hAttrs, "Active", width, 32) &&
 	    sweet_fb_put_num(hAttrs, "PixelRepetition", 0, 32) &&
-	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", lineKHz16, 32) &&
+	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", syncRate16, 32) &&
 	    sweet_fb_put_num(hAttrs, "BackPorch", 20, 32) &&
 	    sweet_fb_put_num(hAttrs, "SyncWidth", 10, 32) &&
 	    sweet_fb_put_num(hAttrs, "FrontPorch", 45, 32) &&
 	    sweet_fb_put_num(hAttrs, "SyncPolarity", 1, 32) &&
-	    sweet_fb_put_num(hAttrs, "SyncRate", ((uint64_t)(vTotal * refresh / 1000)) << 16, 32);
+	    sweet_fb_put_num(hAttrs, "SyncRate", syncRate16, 32);
 	ok = ok && sweet_fb_put_num(vAttrs, "Total", vTotal, 32) &&
 	    sweet_fb_put_num(vAttrs, "Active", height, 32) &&
 	    sweet_fb_put_num(vAttrs, "PixelRepetition", 0, 32) &&
@@ -614,6 +614,11 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
 	    timingElement->setObject("ColorModes", colorModes) &&
+	    sweet_fb_put_num(timingElement, "TimingStandard", 4, 32) &&
+	    sweet_fb_put_num(timingElement, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
+	    sweet_fb_put_num(timingElement, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
+	    timingElement->setObject("IsPreferred", kOSBooleanTrue) &&
+	    timingElement->setObject("IsOverscanned", kOSBooleanFalse) &&
 	    sweet_fb_put_num(timingElement, "StandardType", 2, 32) &&
 	    sweet_fb_put_num(timingElement, "ElementType", 0, 32) &&
 	    sweet_fb_put_num(timingElement, "ID", 1000, 32) &&
