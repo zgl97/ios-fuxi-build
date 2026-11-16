@@ -666,7 +666,7 @@
  };
  
  OSDefineMetaClassAndStructors(AppleCLCD, IOMobileFramebuffer);
-@@ -174,6 +385,163 @@
+@@ -174,6 +385,380 @@
  OSDefineMetaClassAndStructors(IOMobileFramebufferUserClient, IOUserClient);
  #if defined(FUXI)
  extern "C" void fuxi_display_kick(void);
@@ -731,6 +731,222 @@
 + return n > 5 ? 5 : (uint32_t)n;
 +}
 +
++static bool sweet_fb_put_num(OSDictionary *dict, const char *key, uint64_t value, unsigned bits)
++{
++	OSNumber *number = OSNumber::withNumber(value, bits);
++	bool ok = number && dict->setObject(key, number);
++	OSSafeReleaseNULL(number);
++	return ok;
++}
++
++static bool sweet_fb_put_dict(OSDictionary *dict, const char *key, OSDictionary *value)
++{
++	bool ok = value && dict->setObject(key, value);
++	OSSafeReleaseNULL(value);
++	return ok;
++}
++
++static bool sweet_fb_put_string(OSDictionary *dict, const char *key, const char *value)
++{
++	OSString *string = OSString::withCString(value);
++	bool ok = string && dict->setObject(key, string);
++	OSSafeReleaseNULL(string);
++	return ok;
++}
++
++static bool sweet_fb_put_array(OSDictionary *dict, const char *key, OSArray *value)
++{
++	bool ok = value && dict->setObject(key, value);
++	OSSafeReleaseNULL(value);
++	return ok;
++}
++
++static OSDictionary *sweet_fb_color_point(uint32_t x, uint32_t y)
++{
++	OSDictionary *point = OSDictionary::withCapacity(3);
++	if (!point) return NULL;
++	if (!sweet_fb_put_num(point, "X", x, 32) ||
++	    !sweet_fb_put_num(point, "Y", y, 32) ||
++	    !sweet_fb_put_num(point, "Gamma", 0x10000, 32)) {
++		OSSafeReleaseNULL(point);
++	}
++	return point;
++}
++
++/*
++ * Publish the display mode table IOMobileFramebuffer.framework turns into CA's
++ * digital modes.  Without TimingElements the framework leaves CA on its 60 Hz
++ * fallback even when IOMFBDisplayRefresh asks for 120 Hz.
++ */
++static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
++{
++	const uint32_t width = fb->fLogicalW ? fb->fLogicalW : 1125;
++	const uint32_t height = fb->fLogicalH ? fb->fLogicalH : 2436;
++	const uint32_t hTotal = width + 75;
++	const uint32_t vTotal = height + 24;
++	const uint32_t refresh = 120;
++	const uint64_t lineKHz16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
++
++	OSDictionary *attrs = OSDictionary::withCapacity(13);
++	OSDictionary *product = OSDictionary::withCapacity(6);
++	OSDictionary *chroma = OSDictionary::withCapacity(4);
++	OSDictionary *transport = OSDictionary::withCapacity(2);
++	OSDictionary *maxSrc = OSDictionary::withCapacity(5);
++	OSDictionary *scaling = OSDictionary::withCapacity(4);
++	OSDictionary *hAttrs = OSDictionary::withCapacity(9);
++	OSDictionary *vAttrs = OSDictionary::withCapacity(9);
++	OSDictionary *colorElement = OSDictionary::withCapacity(12);
++	OSDictionary *colorMode = OSDictionary::withCapacity(12);
++	OSDictionary *timingElement = OSDictionary::withCapacity(12);
++	OSArray *colors = NULL, *timings = NULL, *colorModes = NULL;
++	OSData *elementData = NULL;
++	bool ok = attrs && product && chroma && transport && maxSrc && scaling &&
++	    hAttrs && vAttrs && colorElement && colorMode && timingElement;
++
++	uint8_t colorBytes[32] = {
++		0x08, 0, 0, 0, 0, 0, 0, 0,
++		0, 0, 0, 0, 0x0a, 0, 0, 0,
++		0, 0, 0, 0, 0x01, 0, 0, 0,
++		0, 0, 0, 0, 0x01, 0, 0, 0
++	};
++	elementData = OSData::withBytes(colorBytes, sizeof(colorBytes));
++
++	ok = ok && sweet_fb_put_num(product, "ProductID", 0, 32) &&
++	    sweet_fb_put_num(product, "SerialNumber", 0, 32) &&
++	    sweet_fb_put_string(product, "ManufacturerID", "APP") &&
++	    sweet_fb_put_string(product, "ProductName", "FUXI iPhone X Panel") &&
++	    sweet_fb_put_num(product, "WeekOfManufacture", 24, 32) &&
++	    sweet_fb_put_num(product, "YearOfManufacture", 2021, 32);
++	ok = ok && sweet_fb_put_dict(chroma, "Red", sweet_fb_color_point(42112, 22016)) &&
++	    sweet_fb_put_dict(chroma, "Green", sweet_fb_color_point(20544, 40640)) &&
++	    sweet_fb_put_dict(chroma, "Blue", sweet_fb_color_point(9920, 3456)) &&
++	    sweet_fb_put_dict(chroma, "White", sweet_fb_color_point(20544, 21568));
++	ok = ok && attrs->setObject("SupportsPQEOTF", kOSBooleanFalse) &&
++	    attrs->setObject("ProductAttributes", product) &&
++	    attrs->setObject("Chromaticity", chroma) &&
++	    attrs->setObject("DefaultColorSpaceIsSRGB", kOSBooleanFalse) &&
++	    sweet_fb_put_dict(attrs, "DefaultWhitePoint", sweet_fb_color_point(20544, 21568)) &&
++	    attrs->setObject("SupportsStandby", kOSBooleanTrue) &&
++	    sweet_fb_put_num(attrs, "ContinuousFrequencySupport", 3, 32) &&
++	    sweet_fb_put_num(attrs, "MaxHorizontalImageSize", 68, 32) &&
++	    sweet_fb_put_num(attrs, "MaxVerticalImageSize", 152, 32) &&
++	    sweet_fb_put_num(attrs, "NativeFormatHorizontalPixels", width, 32) &&
++	    sweet_fb_put_num(attrs, "NativeFormatVerticalPixels", height, 32) &&
++	    sweet_fb_put_num(attrs, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32);
++	ok = ok && sweet_fb_put_string(transport, "Upstream", "Other") &&
++	    sweet_fb_put_string(transport, "Downstream", "Other");
++	ok = ok && sweet_fb_put_num(maxSrc, "MaxSrcBufferWidth", 16384, 32) &&
++	    sweet_fb_put_num(maxSrc, "MaxSrcBufferHeight", 16384, 32) &&
++	    sweet_fb_put_num(maxSrc, "MaxSrcRectWidth", 16384, 32) &&
++	    sweet_fb_put_num(maxSrc, "MaxSrcRectTotal", 0, 32) &&
++	    sweet_fb_put_num(maxSrc, "IOMFBMaxCompressedSizeInBytes", 0, 32);
++	ok = ok && sweet_fb_put_num(scaling, "RGBLayer_MinScaleFraction", 4, 32) &&
++	    sweet_fb_put_num(scaling, "RGBLayer_MaxScale", 4, 32) &&
++	    sweet_fb_put_num(scaling, "YUVLayer_MinScaleFraction", 4, 32) &&
++	    sweet_fb_put_num(scaling, "YUVLayer_MaxScale", 4, 32);
++
++	/* One 8-bit SDR RGB color mode, with the exact IOAV key names from ioreg. */
++	ok = ok && elementData && colorMode->setObject("ElementData", elementData) &&
++	    sweet_fb_put_num(colorMode, "ElementType", 1, 32) &&
++	    sweet_fb_put_num(colorMode, "Depth", 8, 32) &&
++	    sweet_fb_put_num(colorMode, "PixelEncoding", 0, 32) &&
++	    sweet_fb_put_num(colorMode, "EOTF", 0, 32) &&
++	    sweet_fb_put_num(colorMode, "Colorimetry", 10, 32) &&
++	    sweet_fb_put_num(colorMode, "StandardType", 1, 32) &&
++	    sweet_fb_put_num(colorMode, "SupportsDSC", 1, 32) &&
++	    sweet_fb_put_num(colorMode, "DynamicRange", 0, 32) &&
++	    sweet_fb_put_num(colorMode, "ID", 1, 32) &&
++	    colorMode->setObject("IsVirtual", kOSBooleanTrue);
++	ok = ok && sweet_fb_put_num(colorElement, "ElementType", 1, 32) &&
++	    sweet_fb_put_num(colorElement, "Depth", 8, 32) &&
++	    sweet_fb_put_num(colorElement, "PixelEncoding", 0, 32) &&
++	    sweet_fb_put_num(colorElement, "DynamicRange", 0, 32) &&
++	    sweet_fb_put_num(colorElement, "Colorimetry", 10, 32) &&
++	    sweet_fb_put_num(colorElement, "EOTF", 0, 32) &&
++	    colorElement->setObject("IsVirtual", kOSBooleanFalse) &&
++	    sweet_fb_put_num(colorElement, "SupportsDSC", 0, 32) &&
++	    sweet_fb_put_num(colorElement, "StandardType", 2, 32) &&
++	    sweet_fb_put_dict(colorElement, "Chromaticity", sweet_fb_color_point(20544, 21568)) &&
++	    sweet_fb_put_num(colorElement, "WhiteGamma", 0xDC0000, 32) &&
++	    sweet_fb_put_num(colorElement, "Score", 240999, 32);
++
++	ok = ok && sweet_fb_put_num(hAttrs, "Total", hTotal, 32) &&
++	    sweet_fb_put_num(hAttrs, "Active", width, 32) &&
++	    sweet_fb_put_num(hAttrs, "PixelRepetition", 0, 32) &&
++	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", lineKHz16, 32) &&
++	    sweet_fb_put_num(hAttrs, "BackPorch", 20, 32) &&
++	    sweet_fb_put_num(hAttrs, "SyncWidth", 10, 32) &&
++	    sweet_fb_put_num(hAttrs, "FrontPorch", 45, 32) &&
++	    sweet_fb_put_num(hAttrs, "SyncPolarity", 1, 32) &&
++	    sweet_fb_put_num(hAttrs, "SyncRate", ((uint64_t)(vTotal * refresh / 1000)) << 16, 32);
++	ok = ok && sweet_fb_put_num(vAttrs, "Total", vTotal, 32) &&
++	    sweet_fb_put_num(vAttrs, "Active", height, 32) &&
++	    sweet_fb_put_num(vAttrs, "PixelRepetition", 0, 32) &&
++	    sweet_fb_put_num(vAttrs, "PreciseSyncRate", (uint64_t)refresh << 16, 32) &&
++	    sweet_fb_put_num(vAttrs, "BackPorch", 6, 32) &&
++	    sweet_fb_put_num(vAttrs, "SyncWidth", 8, 32) &&
++	    sweet_fb_put_num(vAttrs, "FrontPorch", 10, 32) &&
++	    sweet_fb_put_num(vAttrs, "SyncPolarity", 0, 32) &&
++	    sweet_fb_put_num(vAttrs, "SyncRate", (uint64_t)refresh << 16, 32);
++
++	colors = OSArray::withCapacity(1);
++	timings = OSArray::withCapacity(1);
++	colorModes = OSArray::withCapacity(1);
++	ok = ok && colors && timings && colorModes;
++	ok = ok && colorModes->setObject(colorMode) && colors->setObject(colorElement);
++	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
++	    timingElement->setObject("VerticalAttributes", vAttrs) &&
++	    timingElement->setObject("ColorModes", colorModes) &&
++	    sweet_fb_put_num(timingElement, "StandardType", 1, 32) &&
++	    sweet_fb_put_num(timingElement, "ElementType", 0, 32) &&
++	    sweet_fb_put_num(timingElement, "ID", 1000, 32) &&
++	    timingElement->setObject("IsSplit", kOSBooleanFalse) &&
++	    timingElement->setObject("IsPromoted", kOSBooleanFalse) &&
++	    timingElement->setObject("IsInterlaced", kOSBooleanFalse) &&
++	    sweet_fb_put_array(timingElement, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
++	    sweet_fb_put_num(timingElement, "Score", 17321, 32);
++	ok = ok && timings->setObject(timingElement);
++
++	if (ok) {
++		ok = attrs->setObject("ProductAttributes", product) &&
++		    attrs->setObject("Chromaticity", chroma) &&
++		    attrs->setObject("Transport", transport) &&
++		    attrs->setObject("ColorElements", colors) &&
++		    attrs->setObject("TimingElements", timings) &&
++		    attrs->setObject("IOMFBMaxSrcPixels", maxSrc) &&
++		    attrs->setObject("IOMFBScalingLimits", scaling) &&
++		    fb->setProperty("DisplayAttributes", attrs) &&
++		    fb->setProperty("Transport", transport) &&
++		    fb->setProperty("ColorElements", colors) &&
++		    fb->setProperty("TimingElements", timings) &&
++		    fb->setProperty("IOMFBMaxSrcPixels", maxSrc) &&
++		    fb->setProperty("IOMFBScalingLimits", scaling);
++	}
++	if (ok) {
++		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorElements/TimingElements)\n",
++		    width, height, refresh);
++		fb->messageClients(0xe0000130);
++	} else {
++		IOLog("SWEET FB: display mode publication failed\n");
++	}
++	OSSafeReleaseNULL(elementData);
++	OSSafeReleaseNULL(attrs);
++	OSSafeReleaseNULL(product);
++	OSSafeReleaseNULL(chroma);
++	OSSafeReleaseNULL(transport);
++	OSSafeReleaseNULL(maxSrc);
++	OSSafeReleaseNULL(scaling);
++	OSSafeReleaseNULL(hAttrs);
++	OSSafeReleaseNULL(vAttrs);
++	OSSafeReleaseNULL(colorElement);
++	OSSafeReleaseNULL(colorMode);
++	OSSafeReleaseNULL(timingElement);
++	OSSafeReleaseNULL(colors);
++	OSSafeReleaseNULL(timings);
++	OSSafeReleaseNULL(colorModes);
++	return ok;
++}
++
 +static void sweet_fb_refresh_publish(AppleCLCD *fb)
 +{
 + uint32_t panel120 = 0, hz = 0;
@@ -748,6 +964,7 @@
 + }
 + OSSafeReleaseNULL(interval);
 + OSSafeReleaseNULL(refresh);
++ sweet_fb_publish_display_modes(fb);
 +}
 +
 +static void sweet_fb_te_configure(AppleCLCD *fb)
@@ -830,7 +1047,7 @@
  #endif
  
  bool
-@@ -214,7 +582,33 @@
+@@ -214,7 +799,33 @@
  		OSSafeReleaseNULL(fWorkLoop);
  		return false;
  	}
@@ -865,7 +1082,7 @@
  	if (fVsync == NULL || fWorkLoop->addEventSource(fVsync) != kIOReturnSuccess) {
  		IOLog("SWEET FB: no vsync timer\n");
  		return false;
-@@ -227,11 +621,20 @@
+@@ -227,11 +838,20 @@
  	PE_parse_boot_argn("sweetfb_hz", &hz, sizeof(hz));
  	fFlushTicks = (hz == 0 || hz >= 60) ? 1 : 60 / hz;
  #if defined(FUXI)
@@ -888,7 +1105,7 @@
  #else
  	fVsync->setTimeoutUS(SWEET_FB_VSYNC_US);
  #endif
-@@ -239,28 +642,154 @@
+@@ -239,28 +859,154 @@
  	setProperty(kIOUserClientClassKey, "IOMobileFramebufferUserClient");
  	setProperty("external", false);
  	setProperty("DisplayPipePlaneBaseAlignment", 64ULL, 32);
@@ -1049,7 +1266,7 @@
  #else
  	(void)fb;
  	sender->setTimeoutUS(SWEET_FB_VSYNC_US);
-@@ -272,44 +801,34 @@
+@@ -272,44 +1018,34 @@
  {
  	AppleCLCD *fb = (AppleCLCD *)owner;
  	uint64_t now = mach_absolute_time();
@@ -1112,7 +1329,7 @@
  	if (fb->fPowerOff) {
  		/* Fade out: halve every channel each vsync, then black, then idle. */
  		uint32_t step = fb->fFadeStep;
-@@ -319,14 +838,22 @@
+@@ -319,14 +1055,22 @@
  		IOLockUnlock(fb->fLock);
  #if defined(FUXI)
  		if (step == 0) {
@@ -1140,7 +1357,7 @@
  		}
  #else
  		if (step <= 6) {
-@@ -341,20 +868,13 @@
+@@ -341,20 +1085,13 @@
  		sweet_fb_rearm(fb, sender);
  		return;
  	}
@@ -1168,7 +1385,7 @@
  	sweet_fb_rearm(fb, sender);
  }
  
-@@ -388,38 +908,356 @@
+@@ -388,38 +1125,356 @@
  static uint32_t sweet_fb_swaps_logged;
  static uint64_t sweet_fb_swap_count;
  
@@ -1551,7 +1768,7 @@
  
  	if (!fConsolePaused) {
  		int quiet = 0;
-@@ -442,7 +1280,7 @@
+@@ -442,7 +1497,7 @@
  		if (!(mask & (1u << layer)) || id == 0) {
  			continue;
  		}
@@ -1560,7 +1777,7 @@
  		if (sweet_fb_swaps_logged < 16) {
  			sweet_fb_swaps_logged++;
  			IOLog("SWEET FB: swap %u layer %u surface %u %ux%u fmt 0x%x bpr %u a %d,%d %ux%u b %d,%d %dx%d\n",
-@@ -451,6 +1289,7 @@
+@@ -451,6 +1506,7 @@
  			    get32(a, 12), dx, dy, w, h);
  		}
  		if (s == NULL || s == fSurface) {
@@ -1568,7 +1785,7 @@
  			OSSafeReleaseNULL(s);
  			continue;
  		}
-@@ -500,35 +1339,262 @@
+@@ -500,35 +1556,262 @@
  		if (src != 0 && bpe == 4) {
  			int copied = 0;
  #if defined(FUXI)
@@ -1839,7 +2056,7 @@
  	fStatCopy += took;
  	fStatCopyMax = took > fStatCopyMax ? took : fStatCopyMax;
  	if (++fStatFrames >= 600) {
-@@ -538,15 +1604,47 @@
+@@ -538,15 +1821,47 @@
  		absolutetime_to_nanoseconds(t1 - fStatStart, &span_ns);
  		IOLockLock(fLock);
  		uint32_t swaps = fStatSwaps, dropped = fStatDropped;
@@ -1890,7 +2107,7 @@
  		sweet_surface_gpu_stats(&split);
  		uint64_t ticks[] = {split.pin, split.lookup, split.map, split.clean,
  		    split.submit, split.wait, split.unmap, split.cpu};
-@@ -557,13 +1655,21 @@
+@@ -557,13 +1872,21 @@
  			absolutetime_to_nanoseconds(ticks[i], &ns);
  			us[i] = attempts ? ns / 1000 / attempts : 0;
  		}
@@ -1915,7 +2132,7 @@
  		fGpuBusyTicks = fGpuFailed = 0;
  		fGpuFrames = fCpuFrames = 0;
  		fGpuTime = fCpuTime = 0;
-@@ -571,6 +1677,74 @@
+@@ -571,6 +1894,74 @@
  		fStatCopy = fStatCopyMax = 0;
  		fStatStart = t1;
  	}
@@ -1990,7 +2207,7 @@
  #endif
  }
  
-@@ -620,6 +1794,7 @@
+@@ -620,6 +2011,7 @@
  	IOLockLock(fFB->fLock);
  	old = fPort;
  	fPort = port;
@@ -1998,7 +2215,7 @@
  	IOLockUnlock(fFB->fLock);
  	if (old != MACH_PORT_NULL) {
  		releaseNotificationPort(old);
-@@ -643,6 +1818,40 @@
+@@ -643,6 +2035,40 @@
  }
  
  static uint64_t sweet_fb_logged;        /* selectors already logged (< 64) */
@@ -2039,7 +2256,7 @@
  
  IOReturn
  IOMobileFramebufferUserClient::externalMethod(uint32_t selector, IOExternalMethodArguments *args,
-@@ -660,7 +1869,7 @@
+@@ -660,7 +2086,7 @@
  		break;
  	case kSweetFBSwapBegin:
  		IOLockLock(fFB->fLock);
@@ -2048,7 +2265,7 @@
  		IOLockUnlock(fFB->fLock);
  		outCount = 1;
  		break;
-@@ -672,7 +1881,7 @@
+@@ -672,7 +2098,7 @@
  			break;
  		}
  		memcpy(rec, args->structureInput, sizeof(rec));
@@ -2057,7 +2274,7 @@
  		break;
  	}
  	case kSweetFBGetID:
-@@ -698,6 +1907,7 @@
+@@ -698,6 +2124,7 @@
  			IOLockLock(fFB->fLock);
  			fFunc[type] = args->scalarInput[0];
  			fRefcon[type] = args->scalarInput[1];
@@ -2065,7 +2282,7 @@
  			IOLockUnlock(fFB->fLock);
  			char name[32];
  			proc_selfname(name, sizeof(name));
-@@ -707,19 +1917,13 @@
+@@ -707,19 +2134,13 @@
  		break;
  	case kSweetFBRequestPowerChange:
  		if (args->scalarInputCount >= 1) {
