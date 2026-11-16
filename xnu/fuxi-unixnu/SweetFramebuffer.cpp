@@ -639,6 +639,23 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 		    fb->setProperty("IOMFBMaxSrcPixels", maxSrc) &&
 		    fb->setProperty("IOMFBScalingLimits", scaling);
 	}
+	/*
+	 * IOMobileFramebuffer.framework enumerates the device-tree display
+	 * node (AppleCLCD's provider), not the AppleCLCD service itself, when
+	 * it builds CA's digital mode list.  Publish the same mode properties
+	 * on that node as well so the framework can see them.
+	 */
+	if (ok) {
+		IOService *provider = fb->getProvider();
+		if (provider) {
+			ok = provider->setProperty("DisplayAttributes", attrs) &&
+			    provider->setProperty("Transport", transport) &&
+			    provider->setProperty("ColorElements", colors) &&
+			    provider->setProperty("TimingElements", timings) &&
+			    provider->setProperty("IOMFBMaxSrcPixels", maxSrc) &&
+			    provider->setProperty("IOMFBScalingLimits", scaling);
+		}
+	}
 	if (ok) {
 		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorModes/TimingElements %u/%u)\n",
 		    width, height, refresh, colorModes->getCount(), timings->getCount());
