@@ -583,7 +583,8 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_num(colorElement, "StandardType", 2, 32) &&
 	    sweet_fb_put_dict(colorElement, "Chromaticity", sweet_fb_color_point(20544, 21568)) &&
 	    sweet_fb_put_num(colorElement, "WhiteGamma", 0xDC0000, 32) &&
-	    sweet_fb_put_num(colorElement, "Score", 240999, 32);
+	    sweet_fb_put_num(colorElement, "ID", 100, 32) &&
+	    sweet_fb_put_num(colorElement, "Score", 100, 32);
 
 	ok = ok && sweet_fb_put_num(hAttrs, "Total", hTotal, 32) &&
 	    sweet_fb_put_num(hAttrs, "Active", width, 32) &&
@@ -611,15 +612,15 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && colorModes->setObject(colorMode) && colors->setObject(colorElement);
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
-	    timingElement->setObject("ColorModes", colorModes) &&
-	    sweet_fb_put_num(timingElement, "StandardType", 1, 32) &&
+	    timingElement->setObject("ColorElements", colors) &&
+	    sweet_fb_put_num(timingElement, "StandardType", 2, 32) &&
 	    sweet_fb_put_num(timingElement, "ElementType", 0, 32) &&
 	    sweet_fb_put_num(timingElement, "ID", 1000, 32) &&
 	    timingElement->setObject("IsSplit", kOSBooleanFalse) &&
 	    timingElement->setObject("IsPromoted", kOSBooleanFalse) &&
 	    timingElement->setObject("IsInterlaced", kOSBooleanFalse) &&
 	    sweet_fb_put_array(timingElement, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
-	    sweet_fb_put_num(timingElement, "Score", 17321, 32);
+	    sweet_fb_put_num(timingElement, "Score", 1000, 32);
 	ok = ok && timings->setObject(timingElement);
 
 	if (ok) {
