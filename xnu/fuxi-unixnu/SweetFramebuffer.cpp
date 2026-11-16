@@ -578,6 +578,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_num(colorElement, "DynamicRange", 0, 32) &&
 	    sweet_fb_put_num(colorElement, "Colorimetry", 10, 32) &&
 	    sweet_fb_put_num(colorElement, "EOTF", 0, 32) &&
+	    sweet_fb_put_num(colorElement, "DownstreamFormat", 0, 32) &&
 	    colorElement->setObject("IsVirtual", kOSBooleanFalse) &&
 	    sweet_fb_put_num(colorElement, "SupportsDSC", 0, 32) &&
 	    sweet_fb_put_num(colorElement, "StandardType", 2, 32) &&
@@ -609,10 +610,10 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	timings = OSArray::withCapacity(1);
 	colorModes = OSArray::withCapacity(1);
 	ok = ok && colors && timings && colorModes;
-	ok = ok && colorModes->setObject(colorMode) && colors->setObject(colorElement);
+	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement);
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
-	    timingElement->setObject("ColorElements", colors) &&
+	    timingElement->setObject("ColorModes", colorModes) &&
 	    sweet_fb_put_num(timingElement, "StandardType", 2, 32) &&
 	    sweet_fb_put_num(timingElement, "ElementType", 0, 32) &&
 	    sweet_fb_put_num(timingElement, "ID", 1000, 32) &&
@@ -639,8 +640,8 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 		    fb->setProperty("IOMFBScalingLimits", scaling);
 	}
 	if (ok) {
-		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorElements/TimingElements)\n",
-		    width, height, refresh);
+		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorModes/TimingElements %u/%u)\n",
+		    width, height, refresh, colorModes->getCount(), timings->getCount());
 		fb->messageClients(0xe0000130);
 	} else {
 		IOLog("SWEET FB: display mode publication failed\n");
