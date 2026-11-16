@@ -613,7 +613,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement);
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
-	    timingElement->setObject("ColorModes", colorModes) &&
+	    timingElement->setObject("ColorElements", colorModes) &&
 	    sweet_fb_put_num(timingElement, "TimingStandard", 4, 32) &&
 	    sweet_fb_put_num(timingElement, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
 	    sweet_fb_put_num(timingElement, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
@@ -662,7 +662,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 		}
 	}
 	if (ok) {
-		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorModes/TimingElements %u/%u)\n",
+		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorElements/TimingElements %u/%u)\n",
 		    width, height, refresh, colorModes->getCount(), timings->getCount());
 		fb->messageClients(0xe0000130);
 	} else {
