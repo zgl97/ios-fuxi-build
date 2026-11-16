@@ -500,7 +500,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	const uint32_t hTotal = width + 75;
 	const uint32_t vTotal = height + 24;
 	const uint32_t refresh = 120;
-	const uint64_t syncRate16 = ((uint64_t)height * refresh) << 16;
+	const uint64_t syncRate16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
 
 	OSDictionary *attrs = OSDictionary::withCapacity(13);
 	OSDictionary *product = OSDictionary::withCapacity(6);
