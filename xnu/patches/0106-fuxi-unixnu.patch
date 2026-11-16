@@ -2330,6 +2330,32 @@
  	default:
  		break;
  	}
+@@ -730,14 +2175,23 @@
+ 	if (args->structureOutputDescriptor == NULL && args->structureOutput != NULL) {
+ 		bzero(args->structureOutput, args->structureOutputSize);
+ 	}
+-	if (selector >= 64 || !(sweet_fb_logged & (1ULL << selector))) {
++	/* Log every block/mode query with its scalar arguments: these carry the
++	 * IOMobileFramebufferGetBlock blockID/offset and the SupportedFrameInfo index. */
++	bool log_always = selector == 74 || selector == 79 || selector == 23 || selector == 69;
++	if (log_always || selector >= 64 || !(sweet_fb_logged & (1ULL << selector))) {
+ 		if (selector < 64) {
+ 			sweet_fb_logged |= 1ULL << selector;
+ 		}
+ 		char name[32];
+ 		proc_selfname(name, sizeof(name));
+-		IOLog("SWEET FB: %s sel %u in %u/%u out %u/%u -> 0x%x\n", name, selector,
++		uint64_t s0 = args->scalarInputCount > 0 ? args->scalarInput[0] : 0;
++		uint64_t s1 = args->scalarInputCount > 1 ? args->scalarInput[1] : 0;
++		uint64_t s2 = args->scalarInputCount > 2 ? args->scalarInput[2] : 0;
++		uint64_t s3 = args->scalarInputCount > 3 ? args->scalarInput[3] : 0;
++		IOLog("SWEET FB: %s sel %u in %u/%u s=%llu,%llu,%llu,%llu out %u/%u -> 0x%x\n", name, selector,
+ 		    args->scalarInputCount, args->structureInputSize,
++		    (unsigned long long)s0, (unsigned long long)s1,
++		    (unsigned long long)s2, (unsigned long long)s3,
+ 		    args->scalarOutputCount, args->structureOutputSize, ret);
+ 	}
+ 	return ret;
 --- /dev/null
 +++ b/iokit/Kernel/arm/fuxi_unixnu_copy.h
 @@ -0,0 +1,112 @@
