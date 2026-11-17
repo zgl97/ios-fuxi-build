@@ -672,7 +672,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    timingElement60->setObject("IsInterlaced", kOSBooleanFalse) &&
 	    sweet_fb_put_array(timingElement60, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
 	    sweet_fb_put_num(timingElement60, "Score", 999, 32);
-	ok = ok && timings->setObject(timingElement60);
+	/*
+	 * CA's display-mode gate requires TimingElements count >= 2, but the
+	 * Display::ModeSet is keyed by mode value: an identical second entry
+	 * collapses to one available mode, so FBS still finds currentMode.
+	 */
+	ok = ok && timings->setObject(timingElement);
 
 	if (ok) {
 		ok = attrs->setObject("ProductAttributes", product) &&
