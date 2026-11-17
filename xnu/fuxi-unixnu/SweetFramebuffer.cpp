@@ -501,8 +501,9 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	const uint32_t vTotal = height + 24;
 	const uint32_t refresh = 120;
 	const uint32_t refresh60 = 60;
-	const uint64_t syncRate16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
 	const uint64_t syncRate60 = ((uint64_t)vTotal * refresh60 * 65536ULL) / 1000ULL;
+	/* Native panel horizontal SyncRate as published by AppleCLCD in ioreg. */
+	const uint64_t hSyncRate16 = 1977614336ULL;
 
 	OSDictionary *attrs = OSDictionary::withCapacity(13);
 	OSDictionary *product = OSDictionary::withCapacity(6);
@@ -596,12 +597,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && sweet_fb_put_num(hAttrs, "Total", hTotal, 32) &&
 	    sweet_fb_put_num(hAttrs, "Active", width, 32) &&
 	    sweet_fb_put_num(hAttrs, "PixelRepetition", 0, 32) &&
-	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", syncRate16, 32) &&
+	    sweet_fb_put_num(hAttrs, "PreciseSyncRate", hSyncRate16, 32) &&
 	    sweet_fb_put_num(hAttrs, "BackPorch", 20, 32) &&
 	    sweet_fb_put_num(hAttrs, "SyncWidth", 10, 32) &&
 	    sweet_fb_put_num(hAttrs, "FrontPorch", 45, 32) &&
 	    sweet_fb_put_num(hAttrs, "SyncPolarity", 1, 32) &&
-	    sweet_fb_put_num(hAttrs, "SyncRate", syncRate16, 32);
+	    sweet_fb_put_num(hAttrs, "SyncRate", hSyncRate16, 32);
 	ok = ok && sweet_fb_put_num(vAttrs, "Total", vTotal, 32) &&
 	    sweet_fb_put_num(vAttrs, "Active", height, 32) &&
 	    sweet_fb_put_num(vAttrs, "PixelRepetition", 0, 32) &&
@@ -641,7 +642,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement);
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
-	    timingElement->setObject("ColorElements", colorModes) &&
+	    timingElement->setObject("ColorModes", colorModes) &&
 	    sweet_fb_put_num(timingElement, "TimingStandard", 4, 32) &&
 	    sweet_fb_put_num(timingElement, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
 	    sweet_fb_put_num(timingElement, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
@@ -658,7 +659,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && timings->setObject(timingElement);
 	ok = ok && timingElement60->setObject("HorizontalAttributes", hAttrs60) &&
 	    timingElement60->setObject("VerticalAttributes", vAttrs60) &&
-	    timingElement60->setObject("ColorElements", colorModes) &&
+	    timingElement60->setObject("ColorModes", colorModes) &&
 	    sweet_fb_put_num(timingElement60, "TimingStandard", 4, 32) &&
 	    sweet_fb_put_num(timingElement60, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
 	    sweet_fb_put_num(timingElement60, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
