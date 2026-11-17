@@ -501,9 +501,9 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	const uint32_t vTotal = height + 24;
 	const uint32_t refresh = 120;
 	const uint32_t refresh60 = 60;
-	const uint64_t syncRate60 = ((uint64_t)vTotal * refresh60 * 65536ULL) / 1000ULL;
-	/* Native panel horizontal SyncRate as published by AppleCLCD in ioreg. */
+	/* Native panel horizontal SyncRates as published by AppleCLCD in ioreg. */
 	const uint64_t hSyncRate16 = 1977614336ULL;
+	const uint64_t hSyncRate60 = 988807168ULL;
 
 	OSDictionary *attrs = OSDictionary::withCapacity(13);
 	OSDictionary *product = OSDictionary::withCapacity(6);
@@ -619,12 +619,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	ok = ok && sweet_fb_put_num(hAttrs60, "Total", hTotal, 32) &&
 	    sweet_fb_put_num(hAttrs60, "Active", width, 32) &&
 	    sweet_fb_put_num(hAttrs60, "PixelRepetition", 0, 32) &&
-	    sweet_fb_put_num(hAttrs60, "PreciseSyncRate", syncRate60, 32) &&
+	    sweet_fb_put_num(hAttrs60, "PreciseSyncRate", hSyncRate60, 32) &&
 	    sweet_fb_put_num(hAttrs60, "BackPorch", 20, 32) &&
 	    sweet_fb_put_num(hAttrs60, "SyncWidth", 10, 32) &&
 	    sweet_fb_put_num(hAttrs60, "FrontPorch", 45, 32) &&
 	    sweet_fb_put_num(hAttrs60, "SyncPolarity", 1, 32) &&
-	    sweet_fb_put_num(hAttrs60, "SyncRate", syncRate60, 32);
+	    sweet_fb_put_num(hAttrs60, "SyncRate", hSyncRate60, 32);
 	ok = ok && sweet_fb_put_num(vAttrs60, "Total", vTotal, 32) &&
 	    sweet_fb_put_num(vAttrs60, "Active", height, 32) &&
 	    sweet_fb_put_num(vAttrs60, "PixelRepetition", 0, 32) &&
@@ -674,11 +674,10 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_array(timingElement60, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
 	    sweet_fb_put_num(timingElement60, "Score", 999, 32);
 	/*
-	 * CA's display-mode gate requires TimingElements count >= 2, but the
-	 * Display::ModeSet is keyed by mode value: an identical second entry
-	 * collapses to one available mode, so FBS still finds currentMode.
+	 * CA's display-mode gate requires TimingElements count >= 2.  Publish the
+	 * 60 Hz entry second so the 120 Hz entry remains current and preferred.
 	 */
-	ok = ok && timings->setObject(timingElement);
+	ok = ok && timings->setObject(timingElement60);
 
 	if (ok) {
 		ok = attrs->setObject("ProductAttributes", product) &&
