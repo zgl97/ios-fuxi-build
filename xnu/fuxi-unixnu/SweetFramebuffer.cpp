@@ -500,7 +500,9 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	const uint32_t hTotal = width + 75;
 	const uint32_t vTotal = height + 24;
 	const uint32_t refresh = 120;
+	const uint32_t refresh60 = 60;
 	const uint64_t syncRate16 = ((uint64_t)vTotal * refresh * 65536ULL) / 1000ULL;
+	const uint64_t syncRate60 = ((uint64_t)vTotal * refresh60 * 65536ULL) / 1000ULL;
 
 	OSDictionary *attrs = OSDictionary::withCapacity(13);
 	OSDictionary *product = OSDictionary::withCapacity(6);
@@ -510,13 +512,17 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	OSDictionary *scaling = OSDictionary::withCapacity(4);
 	OSDictionary *hAttrs = OSDictionary::withCapacity(9);
 	OSDictionary *vAttrs = OSDictionary::withCapacity(9);
+	OSDictionary *hAttrs60 = OSDictionary::withCapacity(9);
+	OSDictionary *vAttrs60 = OSDictionary::withCapacity(9);
 	OSDictionary *colorElement = OSDictionary::withCapacity(12);
 	OSDictionary *colorMode = OSDictionary::withCapacity(12);
 	OSDictionary *timingElement = OSDictionary::withCapacity(12);
+	OSDictionary *timingElement60 = OSDictionary::withCapacity(12);
 	OSArray *colors = NULL, *timings = NULL, *colorModes = NULL;
 	OSData *elementData = NULL;
 	bool ok = attrs && product && chroma && transport && maxSrc && scaling &&
-	    hAttrs && vAttrs && colorElement && colorMode && timingElement;
+	    hAttrs && vAttrs && hAttrs60 && vAttrs60 && colorElement && colorMode &&
+	    timingElement && timingElement60;
 
 	uint8_t colorBytes[32] = {
 		0x08, 0, 0, 0, 0, 0, 0, 0,
@@ -605,9 +611,31 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_num(vAttrs, "FrontPorch", 10, 32) &&
 	    sweet_fb_put_num(vAttrs, "SyncPolarity", 0, 32) &&
 	    sweet_fb_put_num(vAttrs, "SyncRate", (uint64_t)refresh << 16, 32);
+	/* CA update_display_modes_locked only calls update_digital_modes when
+	 * ColorElements > 1 or TimingElements >= 2.  The second timing (60 Hz)
+	 * exists to satisfy that gate; the preferred 120 Hz entry is the one CA
+	 * should select. */
+	ok = ok && sweet_fb_put_num(hAttrs60, "Total", hTotal, 32) &&
+	    sweet_fb_put_num(hAttrs60, "Active", width, 32) &&
+	    sweet_fb_put_num(hAttrs60, "PixelRepetition", 0, 32) &&
+	    sweet_fb_put_num(hAttrs60, "PreciseSyncRate", syncRate60, 32) &&
+	    sweet_fb_put_num(hAttrs60, "BackPorch", 20, 32) &&
+	    sweet_fb_put_num(hAttrs60, "SyncWidth", 10, 32) &&
+	    sweet_fb_put_num(hAttrs60, "FrontPorch", 45, 32) &&
+	    sweet_fb_put_num(hAttrs60, "SyncPolarity", 1, 32) &&
+	    sweet_fb_put_num(hAttrs60, "SyncRate", syncRate60, 32);
+	ok = ok && sweet_fb_put_num(vAttrs60, "Total", vTotal, 32) &&
+	    sweet_fb_put_num(vAttrs60, "Active", height, 32) &&
+	    sweet_fb_put_num(vAttrs60, "PixelRepetition", 0, 32) &&
+	    sweet_fb_put_num(vAttrs60, "PreciseSyncRate", (uint64_t)refresh60 << 16, 32) &&
+	    sweet_fb_put_num(vAttrs60, "BackPorch", 6, 32) &&
+	    sweet_fb_put_num(vAttrs60, "SyncWidth", 8, 32) &&
+	    sweet_fb_put_num(vAttrs60, "FrontPorch", 10, 32) &&
+	    sweet_fb_put_num(vAttrs60, "SyncPolarity", 0, 32) &&
+	    sweet_fb_put_num(vAttrs60, "SyncRate", (uint64_t)refresh60 << 16, 32);
 
 	colors = OSArray::withCapacity(1);
-	timings = OSArray::withCapacity(1);
+	timings = OSArray::withCapacity(2);
 	colorModes = OSArray::withCapacity(1);
 	ok = ok && colors && timings && colorModes;
 	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement);
@@ -628,6 +656,23 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_array(timingElement, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
 	    sweet_fb_put_num(timingElement, "Score", 1000, 32);
 	ok = ok && timings->setObject(timingElement);
+	ok = ok && timingElement60->setObject("HorizontalAttributes", hAttrs60) &&
+	    timingElement60->setObject("VerticalAttributes", vAttrs60) &&
+	    timingElement60->setObject("ColorElements", colorModes) &&
+	    sweet_fb_put_num(timingElement60, "TimingStandard", 4, 32) &&
+	    sweet_fb_put_num(timingElement60, "AspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
+	    sweet_fb_put_num(timingElement60, "PreciseAspectRatio", ((uint64_t)width * 65536ULL) / height, 32) &&
+	    timingElement60->setObject("IsPreferred", kOSBooleanFalse) &&
+	    timingElement60->setObject("IsOverscanned", kOSBooleanFalse) &&
+	    sweet_fb_put_num(timingElement60, "StandardType", 2, 32) &&
+	    sweet_fb_put_num(timingElement60, "ElementType", 0, 32) &&
+	    sweet_fb_put_num(timingElement60, "ID", 1001, 32) &&
+	    timingElement60->setObject("IsSplit", kOSBooleanFalse) &&
+	    timingElement60->setObject("IsPromoted", kOSBooleanFalse) &&
+	    timingElement60->setObject("IsInterlaced", kOSBooleanFalse) &&
+	    sweet_fb_put_array(timingElement60, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
+	    sweet_fb_put_num(timingElement60, "Score", 999, 32);
+	ok = ok && timings->setObject(timingElement60);
 
 	if (ok) {
 		ok = attrs->setObject("ProductAttributes", product) &&
@@ -677,9 +722,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	OSSafeReleaseNULL(scaling);
 	OSSafeReleaseNULL(hAttrs);
 	OSSafeReleaseNULL(vAttrs);
+	OSSafeReleaseNULL(hAttrs60);
+	OSSafeReleaseNULL(vAttrs60);
 	OSSafeReleaseNULL(colorElement);
 	OSSafeReleaseNULL(colorMode);
 	OSSafeReleaseNULL(timingElement);
+	OSSafeReleaseNULL(timingElement60);
 	OSSafeReleaseNULL(colors);
 	OSSafeReleaseNULL(timings);
 	OSSafeReleaseNULL(colorModes);
