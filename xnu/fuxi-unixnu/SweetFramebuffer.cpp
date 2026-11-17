@@ -635,11 +635,12 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_num(vAttrs60, "SyncPolarity", 0, 32) &&
 	    sweet_fb_put_num(vAttrs60, "SyncRate", (uint64_t)refresh60 << 16, 32);
 
-	colors = OSArray::withCapacity(1);
-	timings = OSArray::withCapacity(2);
+	colors = OSArray::withCapacity(2);
+	timings = OSArray::withCapacity(1);
 	colorModes = OSArray::withCapacity(1);
 	ok = ok && colors && timings && colorModes;
-	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement);
+	ok = ok && colorModes->setObject(colorElement) && colors->setObject(colorElement) &&
+	    colors->setObject(colorElement);
 	ok = ok && timingElement->setObject("HorizontalAttributes", hAttrs) &&
 	    timingElement->setObject("VerticalAttributes", vAttrs) &&
 	    timingElement->setObject("ColorModes", colorModes) &&
@@ -674,10 +675,9 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	    sweet_fb_put_array(timingElement60, "UnsafeColorElementIDs", OSArray::withCapacity(1)) &&
 	    sweet_fb_put_num(timingElement60, "Score", 999, 32);
 	/*
-	 * CA's display-mode gate requires TimingElements count >= 2.  Publish the
-	 * 60 Hz entry second so the 120 Hz entry remains current and preferred.
+	 * CA's display-mode gate also accepts ColorElements count > 1.  Keep a
+	 * single timing element so the native current mode is not cleared.
 	 */
-	ok = ok && timings->setObject(timingElement60);
 
 	if (ok) {
 		ok = attrs->setObject("ProductAttributes", product) &&
@@ -713,7 +713,7 @@ static bool sweet_fb_publish_display_modes(AppleCLCD *fb)
 	}
 	if (ok) {
 		IOLog("SWEET FB: display modes %ux%u@%u Hz published (ColorElements/TimingElements %u/%u)\n",
-		    width, height, refresh, colorModes->getCount(), timings->getCount());
+		    width, height, refresh, colors->getCount(), timings->getCount());
 		fb->messageClients(0xe0000130);
 	} else {
 		IOLog("SWEET FB: display mode publication failed\n");
