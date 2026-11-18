@@ -2857,7 +2857,9 @@ wl_m6o_master(void)
 	wl_pm_cap = pm;
 	if (!pm || pm > 0xf8 || wl_m6o_write("power-up D0", WL_EPCFG+pm+4, 0, 3) ||
 	    wl_m6o_write("power-up enable MEMORY", WL_EPCFG+4, 0x402, 0xffff) ||
-	    wl_m6o_config_restore(&cfg) || wl_download_aspm()) { return wl_m6o_master_fail("D0/config restore/ASPM"); }
+	    wl_m6o_config_restore(&cfg) || (wl_download_ltr(), wl_download_aspm())) {
+		return wl_m6o_master_fail("D0/config restore/ASPM");
+	}
 	if (wl_seq_flags & WL_O_MSI) {
 		unsigned p = wl_msi_cap;
 		if ((wl_msi_64 && wl_m6o_write("MSI address high", WL_EPCFG+p+8, (uint32_t)(wl_msi_sink.iova>>32), ~0u)) ||
@@ -4935,7 +4937,6 @@ wl5_step(unsigned s)
 			wl_host_diag("preflight-blocked");
 			return 10;
 		}
-		if (!wl_m6o_early()) { wl_download_ltr(); }
 		if (!wl_m6o_early() && wl_download_aspm()) { return 11; }
 		/* ath12k_mhi_clear_vector: undefined reset status is not a result.
 		 * Only doorbells/status, no RDDM buffers and no retry. */
