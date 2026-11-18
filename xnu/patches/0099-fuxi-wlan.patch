@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5315 @@
+@@ -0,0 +1,5390 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -901,6 +901,15 @@
 +/* W14 inputs are retained through keep/containment, including partial reads. */
 +static struct wl_dma wl14_regdb, wl14_bdf, wl14_m3;
 +static char wl14_bdf_name[65]; /* one extra byte detects XNU string truncation */
++/* The firmware names its own crash window in RESPOND_MEM share_mem and gives the
++ * hang_data offset/length in CAP. Keep those facts so the MODE timeout can read
++ * the report once, read-only, instead of only printing the addresses. */
++#define WL14_SHARE_MAX 8u
++static uint64_t wl14_share_start[WL14_SHARE_MAX], wl14_share_size[WL14_SHARE_MAX];
++static uint32_t wl14_share_type[WL14_SHARE_MAX];
++static unsigned wl14_share_n;
++static uint32_t wl14_hang_off, wl14_hang_len;
++static bool wl14_hang_off_seen, wl14_hang_len_seen;
 +#define WL14_FILE_MAX (1024u * 1024u)
 +#define WL14_M3_MAX (2u * 1024u * 1024u)
 +#define WL14_SEG 6144u
@@ -2152,6 +2161,23 @@
 +				return d->va + off + (vm_offset_t)(pa - base);
 +			}
 +		}
++	}
++	return 0;
++}
++
++/* Forward lookup: the device speaks IOVA, we hold the CPU alias. Accept only a
++ * range fully inside one wired allocation, so a bogus firmware pointer can never
++ * reach memory we do not own. */
++static vm_offset_t
++wl_owned_iova_alias(uint64_t iova, unsigned bytes)
++{
++	struct wl_dma *bufs[] = { &wl_tables, &wl_image, &wl_vectors, &wl_contexts, &wl_rddm, &wl_rxvectors, &wl_msi_sink, &wl_amss, &wl_ipcr, &wl14_regdb, &wl14_bdf, &wl14_m3 };
++	unsigned fixed = sizeof(bufs)/sizeof(bufs[0]);
++	for (unsigned i = 0; i < fixed + WL_TARGET_MAX; i++) {
++		struct wl_dma *d = i < fixed ? bufs[i] : &wl_target[i-fixed];
++		if (!d->va || iova < d->iova || iova - d->iova >= d->size ||
++		    bytes > d->size - (iova - d->iova)) { continue; }
++		return d->va + (vm_offset_t)(iova - d->iova);
 +	}
 +	return 0;
 +}
@@ -3451,9 +3477,11 @@
 +			break;
 +		case 0x1e:
 +			if (n != 4) { return wl_w11_fail("hang_data_addr_offset size"); }
++			wl14_hang_off = wl_get32(v); wl14_hang_off_seen = true;
 +			printf("FUXI WLAN: W14 cap hang_data_addr_offset %#x (reported only)\n", wl_get32(v)); break;
 +		case 0x1f:
 +			if (n != 2) { return wl_w11_fail("hang_data_length size"); }
++			wl14_hang_len = wl_get16(v); wl14_hang_len_seen = true;
 +			printf("FUXI WLAN: W14 cap hang_data_length %u (reported only)\n", wl_get16(v)); break;
 +		case 0x22:
 +			/* Vendor protocol fact: u8 count, then 32-byte name + four u32s.
@@ -4163,9 +4191,13 @@
 +		} else if (!indication && msg == 0x36 && type == 0x10) {
 +			if (shared || !n || v[0] > 8 || n != 1u+20u*v[0]) { return wl_w11_fail("RESPOND_MEM share_mem duplicate/bounds"); }
 +			shared = true;
++			wl14_share_n = v[0];
 +			printf("FUXI WLAN: W14 RESPOND_MEM share_mem_len %u (reported only)\n", v[0]);
 +			for (unsigned i = 0; i < v[0]; i++) {
 +				const uint8_t *q = v+1+20*i;
++				wl14_share_type[i] = wl_get32(q);
++				wl14_share_start[i] = wl_get64(q+4);
++				wl14_share_size[i] = wl_get64(q+12);
 +				printf("FUXI WLAN: W14 share_mem %u type %u start %#llx size %#llx (never dereferenced)\n",
 +				    i, wl_get32(q), wl_get64(q+4), wl_get64(q+12));
 +			}
@@ -4305,6 +4337,48 @@
 +	wl_wlfw_diagnostics("W13 RESPOND_MEM");
 +}
 +
++/* The firmware advertises where it will place its own crash report: RESPOND_MEM
++ * share_mem gives the window, CAP gives the offset and length inside it. Read it
++ * once at MODE timeout, read-only and bounded, because BHI_ERRCODE 0xcafecace is
++ * a generic failure code and the actual site is in this block. */
++#define WL15_HANG_MAX 1024u
++static void
++wl15_hang_data(void)
++{
++	if (!wl14_share_n || !wl14_hang_len_seen || !wl14_hang_len) {
++		printf("FUXI WLAN: W15 hang data not advertised (share %u off %u len %u)\n",
++		    wl14_share_n, wl14_hang_off_seen ? wl14_hang_off : 0, wl14_hang_len);
++		return;
++	}
++	unsigned bytes = wl14_hang_len > WL15_HANG_MAX ? WL15_HANG_MAX : wl14_hang_len;
++	/* share_mem entry 0 is the crash/hang window; entries 1.. are the log and
++	 * trace windows and are never read here. */
++	uint64_t start = wl14_share_start[0];
++	uint64_t size = wl14_share_size[0];
++	if (!size || wl14_hang_off > size || bytes > size - wl14_hang_off) {
++		printf("FUXI WLAN: W15 hang data out of window start %#llx size %#llx off %#x len %u\n",
++		    start, size, wl14_hang_off, wl14_hang_len);
++		return;
++	}
++	vm_offset_t alias = wl_owned_iova_alias(start + wl14_hang_off, bytes);
++	if (!alias) {
++		printf("FUXI WLAN: W15 hang data unmapped IOVA %#llx bytes %u\n",
++		    start + wl14_hang_off, bytes);
++		return;
++	}
++	wl_w11_barrier();
++	const uint8_t *p = (const uint8_t *)alias;
++	printf("FUXI WLAN: W15 hang data IOVA %#llx bytes %u window type %u size %#llx (read only, never consumed)\n",
++	    start + wl14_hang_off, bytes, wl14_share_type[0], size);
++	for (unsigned off = 0; off + 4 <= bytes; off += 16) {
++		printf("FUXI WLAN: W15 hang[%#04x] %08x %08x %08x %08x\n", off,
++		    wl_get32(p+off),
++		    off+4 <= bytes-4 ? wl_get32(p+off+4) : 0,
++		    off+8 <= bytes-4 ? wl_get32(p+off+8) : 0,
++		    off+12 <= bytes-4 ? wl_get32(p+off+12) : 0);
++	}
++}
++
 +/* MODE timeout only. Read shared Normal-NC contexts/events without consuming,
 + * crediting, reposting, acknowledging QRTR or ringing any doorbell. BHI owns
 + * ERRCODE/ERRDBG1..3; BHIe exposes vector status, not a second ERRDBG bank.
@@ -4316,6 +4390,7 @@
 +	wl16_snapshot("MODE timeout");
 +	wl15_elapsed("MODE timeout");
 +	wl_wlfw_diagnostics("W15 MODE timeout");
++	wl15_hang_data();
 +	unsigned faults = fw_faults;
 +	uint32_t ctrl = wl_mrd(0x38), tx = wl_mrd(wl_bhie+0x44), rx = wl_mrd(wl_bhie+0x78);
 +	printf("FUXI WLAN: W15 timeout MHICTRL %#x BHIE_TXVECSTATUS %#x BHIE_RXVECSTATUS %#x access-faults %u valid %u\n",
