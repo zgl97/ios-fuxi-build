@@ -4366,24 +4366,35 @@ wl15_hang_data(void)
 	}
 	unsigned bytes = wl14_hang_len > WL15_HANG_MAX ? WL15_HANG_MAX : wl14_hang_len;
 	/* share_mem entry 0 is the crash/hang window; entries 1.. are the log and
-	 * trace windows and are never read here. */
+	 * trace windows and are never read here. hang_data_addr_offset is relative
+	 * to the HOST_DDR chunk base, not to this window: with a 0 offset (r477) the
+	 * two coincide, with native chunk sizes (r482) the window already sits at
+	 * base+offset, so adding it again walks off the end. Read the window itself
+	 * and only report whether the offset resolves against the DDR base. */
 	uint64_t start = wl14_share_start[0];
 	uint64_t size = wl14_share_size[0];
-	if (!size || wl14_hang_off > size || bytes > size - wl14_hang_off) {
-		printf("FUXI WLAN: W15 hang data out of window start %#llx size %#llx off %#x len %u\n",
-		    start, size, wl14_hang_off, wl14_hang_len);
+	uint64_t ddr_base = 0;
+	for (unsigned i = 0; i < wl_target_n; i++) {
+		if (wl_target_type[i] == 1 && wl_target[i].iova) { ddr_base = wl_target[i].iova; break; }
+	}
+	if (ddr_base && wl14_hang_off_seen) {
+		printf("FUXI WLAN: W15 hang data offset %#x resolves %s the HOST_DDR base %#llx (window start %#llx)\n",
+		    wl14_hang_off, ddr_base + wl14_hang_off == start ? "at" : "away from", ddr_base, start);
+	}
+	if (!size || bytes > size) {
+		printf("FUXI WLAN: W15 hang data out of window start %#llx size %#llx len %u\n",
+		    start, size, wl14_hang_len);
 		return;
 	}
-	vm_offset_t alias = wl_owned_iova_alias(start + wl14_hang_off, bytes);
+	vm_offset_t alias = wl_owned_iova_alias(start, bytes);
 	if (!alias) {
-		printf("FUXI WLAN: W15 hang data unmapped IOVA %#llx bytes %u\n",
-		    start + wl14_hang_off, bytes);
+		printf("FUXI WLAN: W15 hang data unmapped IOVA %#llx bytes %u\n", start, bytes);
 		return;
 	}
 	wl_w11_barrier();
 	const uint8_t *p = (const uint8_t *)alias;
 	printf("FUXI WLAN: W15 hang data IOVA %#llx bytes %u window type %u size %#llx (read only, never consumed)\n",
-	    start + wl14_hang_off, bytes, wl14_share_type[0], size);
+	    start, bytes, wl14_share_type[0], size);
 	for (unsigned off = 0; off + 4 <= bytes; off += 16) {
 		printf("FUXI WLAN: W15 hang[%#04x] %08x %08x %08x %08x\n", off,
 		    wl_get32(p+off),
