@@ -729,6 +729,10 @@ static struct wl_dma wl_amss; /* full file when BHI uses a separate prefix */
 static bool wl_qrtr, wl_w12, wl_w13, wl_w14, wl_w15, wl_w11_attempted, wl_w11_ok;
 static unsigned wl15_variant, wl16_variant, wl12_mlo_variant;
 static unsigned wl_rails_variant;
+/* fuxiwlanchunk=1 allocates at the firmware request sizes instead of
+ * declining >2 MiB chunks; upstream ath12k only declines after a failed
+ * dma_alloc_coherent, so this removes the one known behaviour split. */
+static unsigned wl13_native;
 static bool wl_rails_requested;
 static bool wl16_large, wl16_redrive;
 /* ---- P17: opt-in WCN7850 MODE-silence probes (fuxiwlanmlo bits >= 4) ----
@@ -991,6 +995,8 @@ wl_probe_configure(void)
 	wl_vec = wl_variant_arg("fuxiwlanvec", wl_vec_names, 3);
 	wl_cnss = wl_variant_arg("fuxiwlancnss", wl_cnss_names, 2);
 	wl_seq_configure();
+	int chunk = 0;
+	wl13_native = PE_parse_boot_argn("fuxiwlanchunk", &chunk, sizeof(chunk)) && chunk == 1;
 	int rails = 0;
 	wl_rails_requested = PE_parse_boot_argn("fuxiwlanrails", &rails, sizeof(rails));
 	wl_rails_variant = 0;
@@ -1084,6 +1090,7 @@ wl_probe_configure(void)
 	printf("FUXI WLAN: W11 qrtr=%u keep=%u (one conversation after AMSS/M0)\n", wl_qrtr, wl_keep);
 	if (wl_w12) { printf("FUXI WLAN: W12 selected qrtr=%u target memory cap %u bytes\n", wl_w15 ? 5 : wl_w14 ? 4 : wl_w13 ? 3 : 2, WL_TARGET_CAP); }
 	if (wl_w13) { printf("FUXI WLAN: W13 small-chunk policy limit %u bytes; one zero-segment negotiation, aligned IOVAs\n", WL13_CHUNK_LIMIT); }
+	if (wl_w13 && wl13_native) { printf("FUXI WLAN: W13 chunk native sizes, no decline (fuxiwlanchunk=1)\n"); }
 	printf("FUXI WLAN: M6o seq mask %#x valid=%u (selectors default off)\n",
 	    wl_seq_flags, !wl_variant_invalid);
 	printf("FUXI WLAN: M6l pre=%s bhi=%s vec=%s valid=%u\n",
@@ -4772,7 +4779,7 @@ wl_w12_run(void)
 	if (wl12_wait(1, "REQUEST_MEM indication")) { return 1; }
 	for (unsigned round = 0; round < 2; round++) {
 		wl13_delayed = false;
-		if (wl_w13 && !wl13_negotiated) {
+		if (wl_w13 && !wl13_negotiated && !wl13_native) {
 			for (unsigned i = 0; i < wl_target_n; i++) {
 				if (wl13_supported(wl_target_type[i]) && wl_target_size[i] > WL13_CHUNK_LIMIT) {
 					wl13_delayed = true;
