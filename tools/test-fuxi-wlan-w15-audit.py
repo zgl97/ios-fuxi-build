@@ -87,11 +87,12 @@ def requests(omit_shadow=False):
                   svc_cfg_len=14, svc_cfg=SERVICE_ROWS, shadow_reg_valid=0,
                   shadow_reg_v3_valid=not omit_shadow, shadow_reg_v3_len=36,
                   shadow_reg_v3=[(v,) for v in SHADOW_WORDS])
-    # Upstream INI=1; lane policy=0 is the ONLY default W15 value difference.
+    # The lane used to send enable_fwlog=0 against upstream 1; it now matches
+    # upstream so the firmware log can be inspected when MODE stalls.
     linux_ini = encode(INI, dict(enable_fwlog_valid=1, enable_fwlog=1))
-    ini = encode(INI, dict(enable_fwlog_valid=1, enable_fwlog=0))
+    ini = encode(INI, dict(enable_fwlog_valid=1, enable_fwlog=1))
     assert linux_ini == bytes.fromhex('10 01 00 01')
-    assert ini == bytes.fromhex('10 01 00 00')
+    assert ini == linux_ini
     bodies = [ini, encode(CFG, values), encode(MODE, dict(mode=0, hw_debug_valid=1, hw_debug=0))]
     assert [len(b) for b in bodies] == [4, 362 if omit_shadow else 510, 11]
     return [struct.pack('<BHHH', 0, txn, msg, len(body))+body

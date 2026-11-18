@@ -70,7 +70,7 @@ def expected_requests():
     # Top-level QMI_STRING is TLV length delimited: no NUL or count byte.
     cfg = tlv(0x10, b'WIN') + tlv(0x11, array(target))
     cfg += tlv(0x12, array(service)) + tlv(0x17, array([(x,) for x in shadow]))
-    bodies = [tlv(0x10, b'\0'), cfg, tlv(1, struct.pack('<I', 0)) + tlv(0x10, b'\0')]
+    bodies = [tlv(0x10, b'\x01'), cfg, tlv(1, struct.pack('<I', 0)) + tlv(0x10, b'\0')]
     return [struct.pack('<BHHH', 0, txn, msg, len(body)) + body
             for txn, msg, body in zip((13, 14, 15), (0x2f, 0x23, 0x22), bodies)]
 

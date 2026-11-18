@@ -4528,9 +4528,9 @@
 +	static struct wl12_encoder e;
 +	bzero(&e, sizeof(e)); e.len = 7;
 +	/* qmi_wlanfw_wlan_ini_req_msg_v01 / *_ei: optional 0x10 u8.
-+	 * Explicit lane policy: disable fw log (0). Upstream v6.12 sends 1. */
-+	printf("FUXI WLAN: W15 wlan ini enable_fwlog 0\n");
-+	if (wl12_tlv(&e, 0x10, 0, 1) || wl12_send(&e, 0x2f, WL15_INI) ||
++	 * Matches upstream v6.12 qmi.c:3557-3558, which sends 1. */
++	printf("FUXI WLAN: W15 wlan ini enable_fwlog 1\n");
++	if (wl12_tlv(&e, 0x10, 1, 1) || wl12_send(&e, 0x2f, WL15_INI) ||
 +	    wl12_wait(0, "WLAN_INI reply") || wl_w11_wait(3, "W15 INI TX drain")) { return 1; }
 +	printf("FUXI WLAN: W15 wlan ini ok\n");
 +	bzero(&e, sizeof(e)); e.len = 7;
