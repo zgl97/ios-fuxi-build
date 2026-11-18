@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5449 @@
+@@ -0,0 +1,5487 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -1707,6 +1707,43 @@
 +		}
 +	}
 +	return 0;
++}
++
++/* The firmware panics with "Invalid LTR threshold programmed by PCIe RC -
++ * PANIC" (pcielp_core) when the RC advertises an out-of-range Max Snoop or
++ * Max No-Snoop Latency. Read the LTR extended capability (ID 0x18) on both
++ * ends before the doorbell so a bad RC value is visible instead of silent.
++ * fuxiwlanltr=1 additionally clears the requirement bit on the RC. */
++static unsigned
++wl_ltr_one(uint32_t v, const char *who)
++{
++	unsigned scale = (v >> 16) & 7u, value = v & 0xffffu, req = v >> 31;
++	uint64_t ps = (uint64_t)value << (scale * 2);
++	printf("FUXI WLAN: M6k LTR %s %#x requirement %u value %u scale %u (%llu ns)\n",
++	    who, v, req, value, scale, ps / 1000ull);
++	return req;
++}
++
++static void
++wl_download_ltr(void)
++{
++	int fix = 0;
++	(void)PE_parse_boot_argn("fuxiwlanltr", &fix, sizeof(fix));
++	const uint64_t cfg[] = {WL_EPCFG, WL_DBI};
++	for (unsigned i = 0; i < 2; i++) {
++		uint32_t flags = 0;
++		unsigned cap = wl_diag_cap(cfg[i], 0x18, true, &flags);
++		if (flags) { printf("FUXI WLAN: M6k LTR %s capability list invalid\n", i ? "RC" : "EP"); continue; }
++		if (!cap) { printf("FUXI WLAN: M6k LTR %s absent\n", i ? "RC" : "EP"); continue; }
++		uint32_t snoop = wl_prd(cfg[i] + cap + 4), nosnoop = wl_prd(cfg[i] + cap + 8);
++		unsigned req = wl_ltr_one(snoop, i ? "RC snoop" : "EP snoop");
++		req += wl_ltr_one(nosnoop, i ? "RC nosnoop" : "EP nosnoop");
++		if (!fix || !i || !req) { continue; }
++		wl_pwr(cfg[i] + cap + 4, snoop & 0x7fffffffu);
++		wl_pwr(cfg[i] + cap + 8, nosnoop & 0x7fffffffu);
++		printf("FUXI WLAN: M6k LTR RC requirement cleared snoop %#x -> %#x nosnoop %#x -> %#x\n",
++		    snoop, wl_prd(cfg[i] + cap + 4), nosnoop, wl_prd(cfg[i] + cap + 8));
++	}
 +}
 +
 +/* Linux qcom_pcie_config_sid_1_9_0: CRC8/MSB over big-endian BDF,
@@ -4930,6 +4967,7 @@
 +			wl_host_diag("preflight-blocked");
 +			return 10;
 +		}
++		if (!wl_m6o_early()) { wl_download_ltr(); }
 +		if (!wl_m6o_early() && wl_download_aspm()) { return 11; }
 +		/* ath12k_mhi_clear_vector: undefined reset status is not a result.
 +		 * Only doorbells/status, no RDDM buffers and no retry. */
