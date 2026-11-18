@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5390 @@
+@@ -0,0 +1,5449 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -4379,6 +4379,64 @@
 +	}
 +}
 +
++/* RESPOND_MEM advertises three windows: entry 0 is the crash/hang block, the
++ * remaining ones are firmware log and trace buffers that nothing ever consumed
++ * (the "never dereferenced" note in the RESPOND_MEM print). At MODE timeout scan
++ * them read-only for printable ASCII so a firmware-side message can name the
++ * failure that BHI_ERRCODE 0xcafecace only hints at. */
++#define WL15_SCAN_MAX_LINES 48u
++#define WL15_SCAN_MAX_CHARS 96u
++static void
++wl15_share_scan(void)
++{
++	if (wl14_share_n < 2) {
++		printf("FUXI WLAN: W15 share scan skipped (share %u)\n", wl14_share_n);
++		return;
++	}
++	unsigned lines = 0;
++	for (unsigned i = 1; i < wl14_share_n && i < WL14_SHARE_MAX; i++) {
++		uint64_t start = wl14_share_start[i], size = wl14_share_size[i];
++		if (!size || size > (1ull << 20)) {
++			printf("FUXI WLAN: W15 share %u unusable start %#llx size %#llx\n",
++			    i, start, size);
++			continue;
++		}
++		vm_offset_t alias = wl_owned_iova_alias(start, (unsigned)size);
++		if (!alias) {
++			printf("FUXI WLAN: W15 share %u unmapped IOVA %#llx size %#llx\n",
++			    i, start, size);
++			continue;
++		}
++		wl_w11_barrier();
++		const uint8_t *p = (const uint8_t *)alias;
++		unsigned found = 0;
++		char text[WL15_SCAN_MAX_CHARS + 1];
++		for (unsigned off = 0; off < (unsigned)size; ) {
++			unsigned run = 0;
++			while (off + run < (unsigned)size && run < WL15_SCAN_MAX_CHARS) {
++				uint8_t c = p[off + run];
++				if (c < 0x20 || c > 0x7e) { break; }
++				text[run] = (char)c;
++				run++;
++			}
++			if (run >= 6) {
++				text[run] = 0;
++				found++;
++				if (lines < WL15_SCAN_MAX_LINES) {
++					lines++;
++					printf("FUXI WLAN: W15 share %u str[%#06x] %s\n",
++					    i, off, text);
++				}
++				off += run;
++			} else {
++				off += run + 1;
++			}
++		}
++		printf("FUXI WLAN: W15 share %u type %u start %#llx size %#llx strings %u printed %u\n",
++		    i, wl14_share_type[i], start, size, found, lines);
++	}
++}
++
 +/* MODE timeout only. Read shared Normal-NC contexts/events without consuming,
 + * crediting, reposting, acknowledging QRTR or ringing any doorbell. BHI owns
 + * ERRCODE/ERRDBG1..3; BHIe exposes vector status, not a second ERRDBG bank.
@@ -4391,6 +4449,7 @@
 +	wl15_elapsed("MODE timeout");
 +	wl_wlfw_diagnostics("W15 MODE timeout");
 +	wl15_hang_data();
++	wl15_share_scan();
 +	unsigned faults = fw_faults;
 +	uint32_t ctrl = wl_mrd(0x38), tx = wl_mrd(wl_bhie+0x44), rx = wl_mrd(wl_bhie+0x78);
 +	printf("FUXI WLAN: W15 timeout MHICTRL %#x BHIE_TXVECSTATUS %#x BHIE_RXVECSTATUS %#x access-faults %u valid %u\n",
