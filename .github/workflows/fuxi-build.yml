@@ -28,6 +28,10 @@ on:
         description: Compile-only audit of the Ath12kWifi Linux stack (125 objects; links nothing)
         type: boolean
         default: false
+      ath12k_kernel_run:
+        description: ath12k - run ID whose fuxi-kernel-* artifact to audit the objects against (empty skips the gap)
+        type: string
+        default: ''
       runner:
         description: Hosted macOS image (macos-14 is unsupported from 2026-11-02)
         type: choice
@@ -91,6 +95,7 @@ jobs:
       FUXI_IIG_MODE: ${{ inputs.iig_mode }}
       XCODE_VERSION: ${{ inputs.xcode }}
       IIG_RUN: ${{ inputs.iig_run }}
+      ATH12K_KERNEL_RUN: ${{ inputs.ath12k_kernel_run }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -130,6 +135,23 @@ jobs:
           [[ -f $1/manifest.json ]] || { echo "::error::run $IIG_RUN has no fuxi-iig-pregen-* artifact"; exit 1; }
           for d; do diff -r "$1" "$d"; done
           echo "FUXI_IIG_CACHE=$PWD/$1" >> "$GITHUB_ENV"
+      # The gap is only meaningful against a kernel image, so when the caller
+      # names a run that produced one, fetch it and point the audit at it. The
+      # artifact name is fuxi-kernel-<profile>; the profile is not an input here
+      # because the run id already fixes which kernel was built.
+      - uses: actions/download-artifact@v4
+        if: matrix.target == 'kernel-ath12k' && inputs.ath12k_kernel_run != ''
+        with:
+          pattern: fuxi-kernel-*
+          path: deps/ath12k-kernel
+          run-id: ${{ inputs.ath12k_kernel_run }}
+          github-token: ${{ github.token }}
+      - name: Point the ath12k audit at a kernel image
+        if: matrix.target == 'kernel-ath12k' && inputs.ath12k_kernel_run != ''
+        run: |
+          set -- deps/ath12k-kernel/*/kernel.development.fuxi
+          [[ -f $1 ]] || { echo "::error::run $ATH12K_KERNEL_RUN has no fuxi-kernel-*/kernel.development.fuxi"; exit 1; }
+          echo "FUXI_ATH12K_KERNEL=$PWD/$1" >> "$GITHUB_ENV"
       - name: Build selected target (no boot-image packing)
         run: bash tools/ci/build.sh "$TARGET"
       - name: Upload target outputs and logs

@@ -526,6 +526,15 @@ kernel_ath12k() {
         comm -12 "$work/globals.txt" "$work/kernel-exports.txt" > "$out/ath12k-collisions.txt"
         printf 'collisions=%s\n' "$(wc -l < "$out/ath12k-collisions.txt" | tr -d ' ')" \
             | tee -a "$out/ath12k-link-gap-summary.txt"
+        # A name the objects need and the kernel does not export is the one
+        # result this lane exists to catch, so it fails the build rather than
+        # sitting in a file nobody opens. Both gaps are checked: the narrower one
+        # is a subset, but the wider one is what a kext would actually resolve
+        # against, and a missing C library name is just as fatal there.
+        for label in external needs-kernel; do
+            [[ ! -s $out/ath12k-gap-$label.txt ]] ||
+                die "kernel lacks $(wc -l < "$out/ath12k-gap-$label.txt" | tr -d ' ') name(s) the objects need; see ath12k-gap-$label.txt"
+        done
     else
         echo 'No FUXI_ATH12K_KERNEL: symbols recorded, the gaps and collisions against kernel exports were not computed.' \
             | tee "$out/ath12k-link-gap-summary.txt"
