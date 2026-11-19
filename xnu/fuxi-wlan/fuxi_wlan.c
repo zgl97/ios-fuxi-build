@@ -5559,6 +5559,8 @@ fuxi_wlan_init(void)
 	static bool started;
 	int arg = 0;
 	thread_t thread;
+	/* Defined in fuxi_wlan_board.c, included at the end of this file. */
+	extern void fuxi_wlan_board_init(void);
 	if (started) {
 		return;
 	}
@@ -5568,6 +5570,10 @@ fuxi_wlan_init(void)
 	}
 	unsigned limit = (arg == 1 || arg > (int)WL5_STEPS) ? WL5_STEPS : (unsigned)arg;
 	wl_iova_configure();
+	/* Board layer for the Ath12kWifi stack (fuxi_wlan_board.c, included at the
+	 * end of this file). Reads fuxiwifilinux and returns immediately when it is
+	 * unset, so the old lane is unaffected. */
+	fuxi_wlan_board_init();
 	printf("FUXI WLAN: enabled (fuxiwlan=%d), WCN7850 power-up + PCIe0 + MHI firmware, limit %u\n",
 	    arg, limit);
 	if (kernel_thread_start(fw_thread, (void *)(uintptr_t)limit, &thread) == KERN_SUCCESS) {
@@ -5576,4 +5582,14 @@ fuxi_wlan_init(void)
 		printf("FUXI WLAN: kernel_thread_start failed\n");
 	}
 }
+
+/*
+ * Milestone 1 of the Ath12kWifi port: the board layer the Linux stack calls
+ * into (lx_platform + nw_board, nw_abi.h). It is included rather than compiled
+ * separately because every primitive it needs — wl_prd/wl_pwr, wl_dma_alloc,
+ * wl_iova_base, wl_msi_sink, fw_faults — is static in this file, and widening
+ * those to external linkage would change the r491 lane's own compilation.
+ * Gated by fuxiwifilinux (default 0), so the wire stays byte-identical.
+ */
+#include "fuxi_wlan_board.c"
 #endif /* FUXI */

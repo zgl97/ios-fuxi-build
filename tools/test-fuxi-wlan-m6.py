@@ -1038,6 +1038,14 @@ int main(void) {
 '''
 
 
+def _hunk(patch, target):
+    """Whole-file hunk body of `target` as the source text it reconstructs."""
+    added = patch.split('+++ b/' + target + '\n', 1)[1]
+    if '\n--- a/' in added:
+        added = added.split('\n--- a/', 1)[0]
+    return '\n'.join(line[1:] for line in added.splitlines() if line.startswith('+')) + '\n'
+
+
 def main():
     driver = (ROOT / 'xnu/fuxi-wlan/fuxi_wlan.c').read_text()
     patch = (ROOT / 'xnu/patches/0099-fuxi-wlan.patch').read_text()
@@ -1046,9 +1054,21 @@ def main():
     assert count and int(count[1]) == len(driver.splitlines()), 'WLAN new-file hunk count differs'
     reconstructed = '\n'.join(line[1:] for line in added.splitlines() if line.startswith('+')) + '\n'
     assert reconstructed == driver, 'integration patch and standalone WLAN C differ'
-    included = patch.split('+++ b/bsd/dev/wlan.c\n', 1)[1]
-    reconstructed = '\n'.join(line[1:] for line in included.splitlines() if line.startswith('+')) + '\n'
-    assert reconstructed == (ROOT / 'shim/fuxi-probe/wlan.c').read_text(), 'included M3 source differs'
+    assert _hunk(patch, 'bsd/dev/wlan.c') == (ROOT / 'shim/fuxi-probe/wlan.c').read_text(), 'included M3 source differs'
+    # The Ath12kWifi board layer is quoted into fuxi_wlan.c and needs its header
+    # beside it in the kernel tree; both must be carried by the same patch.
+    for source, target in (('fuxi_wlan_board.c', 'bsd/dev/fuxi_wlan_board.c'),
+                           ('nw_abi.h', 'bsd/dev/nw_abi.h')):
+        want = (ROOT / 'xnu/fuxi-wlan' / source).read_text()
+        body = patch.split('+++ b/' + target + '\n', 1)[1]
+        if '\n--- a/' in body:
+            body = body.split('\n--- a/', 1)[0]
+        head = re.match(r'@@ -0,0 \+1,(\d+) @@\n', body)
+        assert head and int(head[1]) == len(want.splitlines()), '%s hunk count differs' % source
+        assert _hunk(patch, target) == want, '%s patch body differs' % source
+    assert '#include "fuxi_wlan_board.c"' in driver, 'board layer is not included by fuxi_wlan.c'
+    assert '#include "nw_abi.h"' in (ROOT / 'xnu/fuxi-wlan/fuxi_wlan_board.c').read_text(), \
+        'board layer does not include the vendored ABI header'
     block = driver.split('/* ---- milestone 5:', 1)[1].split('static void\nfw_dump(', 1)[0]
     block = '/* ---- milestone 5:' + block
     block = re.sub(r'__asm__ volatile\([^;]+;', '/* host memory barrier */;', block)
