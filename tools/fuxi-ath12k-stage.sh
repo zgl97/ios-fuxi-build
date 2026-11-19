@@ -62,10 +62,12 @@ if [[ ! -s $archive ]]; then
 fi
 echo "$LINUX_SHA256  $archive" | shasum -a 256 -c -
 rm -rf "$DEST/deps/linux"
-mkdir -p "$DEST/deps/linux"
-# --strip-components=1 drops the linux-7.0.14/ prefix; the path list is what the
-# stack includes, so the extracted tree is ~74 MB instead of 1.4 GB.
-tar -xJf "$archive" -C "$DEST/deps/linux" --strip-components=1 -T "$DEST/deps/linux-paths.txt"
+# The selection is done in python, not with tar -T: bsdtar strips the leading
+# component before matching the list, so `--strip-components=1 -T paths` misses
+# every entry on macOS while working under GNU tar. Only the paths the stack
+# includes are extracted, so the tree is ~74 MB instead of 1.4 GB.
+python3 "$root/tools/ci/extract-linux-subset.py" \
+    "$archive" "$DEST/deps/linux" "$DEST/deps/linux-paths.txt"
 echo "linux files=$(find "$DEST/deps/linux" -type f | wc -l | tr -d ' ')"
 
 stage 'supplicant tarball'
