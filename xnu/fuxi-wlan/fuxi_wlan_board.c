@@ -567,23 +567,27 @@ wl_board_poll(void)
 /*
  * Paired native hooks for the stack's control/status locks (nw_abi.h:24).
  * The sheng reference passes two extern symbols here and never defines them in
- * its own tree (WifiProbe.cpp:1193), so they come from the kernel. XNU's
- * exported pair is disable_preemption()/enable_preemption() -- the same calls
- * 0012-sweet-keep-debug-console-after-ttbr0.patch uses in start.s, and both are
- * declared by <kern/sched_prim.h>, which fuxi_wlan.c includes before this file.
+ * its own tree (WifiProbe.cpp:1193), so they come from the kernel.
+ *
+ * <kern/sched_prim.h> only publishes the plain names under MACH_KERNEL_PRIVATE;
+ * what this kernel actually exports (checked in the r491 image's symbol table)
+ * is _disable_preemption / _enable_preemption, so declare those here.
  */
+extern void _disable_preemption(void);
+extern void _enable_preemption(void);
+
 static void
 wl_board_preempt_disable(void)
 {
 	if (wl_board_host) { return; }
-	disable_preemption();
+	_disable_preemption();
 }
 
 static void
 wl_board_preempt_enable(void)
 {
 	if (wl_board_host) { return; }
-	enable_preemption();
+	_enable_preemption();
 }
 
 /* ---- the two tables ---------------------------------------------------- */

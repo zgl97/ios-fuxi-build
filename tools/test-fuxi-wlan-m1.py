@@ -176,8 +176,8 @@ static struct wl_dma wl_msi_sink;
 static void wl_sleep(unsigned ms) { (void)ms; }
 static void delay_for_interval(unsigned us, uint64_t ns) { (void)us; (void)ns; }
 static int preempt_depth;
-static void disable_preemption(void) { preempt_depth++; }
-static void enable_preemption(void) { preempt_depth--; }
+static void _disable_preemption(void) { preempt_depth++; }
+static void _enable_preemption(void) { preempt_depth--; }
 
 static uint64_t mach_absolute_time(void) { return 1234567890ull; }
 static uint64_t mach_continuous_time(void) { return 9876543210ull; }
