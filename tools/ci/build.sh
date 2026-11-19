@@ -275,7 +275,9 @@ kernel() {
         python3 tools/test-fuxi-wlan-rails.py
         python3 tools/test-fuxi-wlan-m2a.py
         python3 tools/test-fuxi-wlan-m1.py
+        python3 tools/test-fuxi-wlan-patch.py
         shasum -a 256 xnu/fuxi-wlan/fuxi_wlan.c xnu/patches/0099-fuxi-wlan.patch \
+            xnu/fuxi-wlan/fuxi_wlan_board.c xnu/fuxi-wlan/nw_abi.h \
             shim/fuxi-probe/wlan.c > "$out/wlan-source-SHA256SUMS.txt"
     fi
     source_checkout dxb https://github.com/blacktop/darwin-xnu-build.git "$DXB_SHA" "$dxb"

@@ -6179,7 +6179,6 @@
 + }
 + r[3] = 0;
 +}
-
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
 @@ -0,0 +1,754 @@
