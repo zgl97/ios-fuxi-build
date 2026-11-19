@@ -80,12 +80,15 @@ echo "$SUPPLICANT_SHA256  $supp" | shasum -a 256 -c -
 tar -xzf "$supp" -C "$DEST/deps"
 echo "supplicant files=$(find "$DEST/deps/$SUPPLICANT_DIR" -type f | wc -l | tr -d ' ')"
 
-stage 'source-lock bypass'
-# fetch-sources.py insists on a git revision for deps/linux, which a tarball
-# cannot carry. The bypass skips the revision read and still enforces the
-# required-file list, so a truncated extraction still fails here rather than
-# three hundred lines into a compile.
+stage 'toolchain compatibility'
+# Two patches the stack needs on this toolchain rather than on the pinned
+# commit. The first is the source-lock bypass above. The second turns
+# BUILD_BUG_ON into a statement: mac80211 uses it straight after case labels,
+# which is a C23 extension, and clang 16 rejects it there where clang 21 only
+# warns. Both are applied before prepare.sh, which symlinks the headers they
+# change.
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-skip-source-lock.patch"
+patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-build-bug-on-statement.patch"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'

@@ -1,0 +1,18 @@
+A declaration cannot follow a label before C23, and clang 16 (the CI
+toolchain) rejects it there instead of warning like clang 21 does.
+BUILD_BUG_ON is used straight after case labels in mac80211.
+
+--- a/shim/include/lx.h
++++ b/shim/include/lx.h
+@@ -93,7 +93,10 @@
+ #define WARN_ON_ONCE(c) WARN_ON(c)
+ #define WARN(c, ...) ({ int _w = !!(c); if (_w) lx_warn(__FILE__, __LINE__); _w; })
+ #define BUG_ON(c) do { if (c) lx_bug(__FILE__, __LINE__); } while (0)
+-#define BUILD_BUG_ON(c) _Static_assert(!(c), "build bug")
++/* A declaration cannot follow a label before C23, and clang 16 (the CI
++ * toolchain) rejects it there instead of warning like clang 21 does.
++ * BUILD_BUG_ON is used straight after case labels in mac80211. */
++#define BUILD_BUG_ON(c) do { _Static_assert(!(c), "build bug"); } while (0)
+ #define READ_ONCE(x) (*(volatile __typeof__(x) *)&(x))
+ #define WRITE_ONCE(x, v) (*(volatile __typeof__(x) *)&(x) = (v))
+ #define smp_wmb() wmb()
