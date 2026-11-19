@@ -246,6 +246,9 @@ reset_fixtures(void)
      * capability-list bit is Status bit 4 = dword bit 20. The endpoint reports
      * 0x100406 here, so this fixture keeps the low half non-zero too. */
     fake_cfg[CFG_CMD / 4] = 0x0406u | (1u << 20);
+    /* A real subsystem id, because wl_board_prepare() now refuses a wire that
+     * reads back zero or all-ones there. */
+    fake_cfg[0x2c / 4] = (0x1107u << 16) | 0x17cbu;
     /* list: PCIe (0x10) then MSI (0x05), terminator 0 */
     fake_cfg[CFG_CAP / 4] = PCIE_CAP | (MSI_CAP << 8);
     fake_cfg[PCIE_CAP / 4] = 0x10u | ((MSI_CAP & 0xff) << 8) | (2u << 16);
@@ -272,6 +275,16 @@ reset_fixtures(void)
 static struct wl_board_host host;
 static unsigned fw_reads;
 static char fw_last_name[64];
+/* Dword index whose writes are dropped, so a test can prove that a config
+ * word refusing to change is caught by read-back rather than assumed. */
+static uint32_t cfg_veto_word = 0xffffffffu;
+
+static int
+host_cfg_veto(uint32_t word_off, uint32_t merged)
+{
+    (void)merged;
+    return word_off / 4 == cfg_veto_word;
+}
 
 static int
 host_fw_read(const char *name, uint8_t **data, size_t *size)
@@ -298,9 +311,11 @@ attach_host(void)
     host.pcie_cap = PCIE_CAP;
     host.msi_cap = MSI_CAP;
     host.fw_read = host_fw_read;
+    host.cfg_veto = host_cfg_veto;
     fuxi_wlan_board_host(&host);
     fw_reads = 0;
     fw_last_name[0] = 0;
+    cfg_veto_word = 0xffffffffu;
 }
 
 /* ---- capability discovery --------------------------------------------- */
@@ -546,6 +561,67 @@ test_platform(void)
     puts("M1 platform callbacks ok");
 }
 
+/* ---- subsystem id and max read request --------------------------------- */
+
+/*
+ * These two run inside wl_board_prepare(), so they have to be right on the
+ * first boot rather than discovered later: nw_pci.c:59 keys the board file off
+ * the subsystem pair, and nw_pci.c:61 clears Max_Read_Request before any
+ * register access happens.
+ */
+static void
+test_identity(void)
+{
+    /* A real subsystem id is read through and logged. */
+    reset_fixtures();
+    attach_host();
+    fake_cfg[0x2c / 4] = (0x1107u << 16) | 0x17cbu;
+    assert(wl_board_subsystem() == 0);
+    assert(strstr(logbuf, "subsystem vendor 0x17cb device 0x1107"));
+
+    /* Zero and all-ones are not ids: a wire that reads back either is broken,
+     * and passing it on would silently pick the wrong board file. */
+    reset_fixtures();
+    attach_host();
+    fake_cfg[0x2c / 4] = 0;
+    assert(wl_board_subsystem() == 1);
+    assert(strstr(logbuf, "not a real id"));
+
+    reset_fixtures();
+    attach_host();
+    fake_cfg[0x2c / 4] = 0xffffffffu;
+    assert(wl_board_subsystem() == 1);
+
+    /* Max_Read_Request starts non-zero, is cleared, and reads back clear. */
+    reset_fixtures();
+    attach_host();
+    fake_cfg[PCIE_MARK / 4] = PCIE_MARK_VAL;   /* keep the marker readable */
+    fake_cfg[(PCIE_CAP + 8) / 4] = 0x2000u | 0x0007u;   /* 512 B, other bits */
+    assert(wl_board_maxread() == 0);
+    assert((fake_cfg[(PCIE_CAP + 8) / 4] & 0x7000u) == 0);
+    assert((fake_cfg[(PCIE_CAP + 8) / 4] & 0x0007u) == 0x0007u);   /* untouched */
+    assert(strstr(logbuf, "max read request 128 bytes"));
+
+    /* Already clear: no write, still success. */
+    reset_fixtures();
+    attach_host();
+    fake_cfg[(PCIE_CAP + 8) / 4] = 0x0007u;
+    const unsigned before = pwr_calls;
+    assert(wl_board_maxread() == 0);
+    assert(pwr_calls == before);
+
+    /* A word that refuses to clear must be caught, not assumed. */
+    reset_fixtures();
+    attach_host();
+    fake_cfg[(PCIE_CAP + 8) / 4] = 0x7000u;
+    cfg_veto_word = (PCIE_CAP + 8) / 4;
+    assert(wl_board_maxread() == 1);
+    assert(strstr(logbuf, "max read request still"));
+    cfg_veto_word = 0xffffffffu;
+
+    puts("M1 identity ok");
+}
+
 /* ---- selector ---------------------------------------------------------- */
 
 static void
@@ -619,6 +695,7 @@ main(void)
 {
     test_caps();
     test_config();
+    test_identity();
     test_dma();
     test_firmware();
     test_platform();

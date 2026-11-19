@@ -96,6 +96,12 @@ struct wl_board_host {
 	uint32_t msi_cap;		/* offset of capability 0x05 */
 	int (*fw_read)(const char *name, uint8_t **data, size_t *size);
 	uint64_t (*now_ns)(void);
+	/*
+	 * Optional write veto: returns non-zero to make the write a no-op, which
+	 * is how the harness proves that a word which refuses to change is caught
+	 * instead of assumed. NULL under XNU and in the ordinary host cases.
+	 */
+	int (*cfg_veto)(uint32_t word_off, uint32_t merged);
 };
 static struct wl_board_host *wl_board_host;
 
@@ -162,7 +168,13 @@ wl_board_cfg_write(int off, int size, uint32_t v)
 
 	if (wl_board_host) {
 		if (at + 4 > wl_board_host->cfg_dwords * 4) { return 1; }
-		wl_board_host->cfg[at / 4] = (wl_board_host->cfg[at / 4] & ~mask) | value;
+		const uint32_t merged = (wl_board_host->cfg[at / 4] & ~mask) | value;
+		/* A vetoed write is dropped but reported as done: that is the real
+		 * failure mode of a config word that ignores its owner, and the caller
+		 * has to catch it by reading back, not by trusting the return code. */
+		if (wl_board_host->cfg_veto == NULL || !wl_board_host->cfg_veto(at, merged)) {
+			wl_board_host->cfg[at / 4] = merged;
+		}
 		return 0;
 	}
 	uint32_t old = wl_prd(WL_EPCFG + at);
@@ -674,6 +686,63 @@ wl_board_caps(uint32_t *device_id, uint32_t *msi_cap, uint32_t *pcie_cap)
 }
 
 /*
+ * Subsystem identity. nw_pci.c:59 reads 0x2c and fills subsystem_vendor /
+ * subsystem_device, and the comment there says the board file is picked by
+ * these — so this lane has to be able to read it, and has to report what the
+ * endpoint actually says rather than assume. ath12k's board-2.bin entries are
+ * keyed by exactly this pair (see WLAN-BDF-M0D.md), which is why the value is
+ * logged: it is the input to the BDF choice, not decoration.
+ */
+static int
+wl_board_subsystem(void)
+{
+	uint32_t sub = 0;
+	if (wl_board_cfg_read(0x2c, 4, &sub)) {
+		printf("FUXI WLAN: L1 subsystem id unreadable; contain\n");
+		return 1;
+	}
+	if (sub == 0 || sub == ~0u) {
+		printf("FUXI WLAN: L1 subsystem id %#x is not a real id; contain\n", sub);
+		return 1;
+	}
+	printf("FUXI WLAN: L1 subsystem vendor %#x device %#x (board-2 key %#x:%#x)\n",
+	    sub & 0xffffu, sub >> 16, sub & 0xffffu, sub >> 16);
+	return 0;
+}
+
+/*
+ * Cap Max_Read_Request at 128 bytes. nw_pci.c:61 does exactly this to the
+ * device control word at PCIe capability offset 8 — it passes 0x80000008, whose
+ * bit 31 means "inside the PCIe capability" (nw_abi.h:31), so the real offset
+ * is pcie_cap + 8. Bits 14:12 are Max_Read_Request size; clearing them selects
+ * 128 B. The endpoint is a Gen2 x1 link whose MHI doorbells are dword writes,
+ * and the old lane never touched this, so it is logged rather than assumed.
+ */
+static int
+wl_board_maxread(void)
+{
+	uint32_t ctl = 0;
+	const int at = (int)(0x80000000u | 8u);
+	if (wl_board_cfg_read(at, 2, &ctl)) {
+		printf("FUXI WLAN: L1 device control unreadable; contain\n");
+		return 1;
+	}
+	const uint32_t was = ctl;
+	const uint32_t now = ctl & ~0x7000u;
+	if (now != was && wl_board_cfg_write(at, 2, now)) {
+		printf("FUXI WLAN: L1 device control write failed (%#x); contain\n", was);
+		return 1;
+	}
+	uint32_t back = 0;
+	if (wl_board_cfg_read(at, 2, &back) || (back & 0x7000u)) {
+		printf("FUXI WLAN: L1 max read request still %#x (was %#x); contain\n", back, was);
+		return 1;
+	}
+	printf("FUXI WLAN: L1 device control %#x -> %#x max read request 128 bytes\n", was, back);
+	return 0;
+}
+
+/*
  * Prepare the board table. The register window is the endpoint's BAR0, which
  * the old lane already assigned and verified (fuxi_wlan.c step 15, WL_BAR0
  * 0x60400000, 2 MiB non-prefetchable); this lane never re-programs it, so the
@@ -707,6 +776,7 @@ wl_board_prepare(void)
 	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%lu irq base %d\n",
 	    device, msi, pcie, (uint64_t)WL_BAR0, (unsigned long)wl_board.bar_len,
 	    wl_board.irq_base);
+	if (wl_board_subsystem() || wl_board_maxread()) { return 1; }
 	return 0;
 }
 
