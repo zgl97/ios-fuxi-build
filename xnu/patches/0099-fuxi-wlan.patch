@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5603 @@
+@@ -0,0 +1,5606 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -398,6 +398,11 @@
 +
 +static bool wl_m6o_parf(void);
 +static int wl_m6o_host(unsigned);
++/* Milestone 1 board layer, defined in fuxi_wlan_board.c at the end of this
++ * file. The prototype has to live up here: step 19 calls it, the definition
++ * comes 2,000 lines later, and a call without a prototype is implicitly
++ * int(void) — which then conflicts with the real void(void) definition. */
++extern void fuxi_wlan_board_init(void);
 +#define FUXI_WLAN_XNU 1
 +#include "wlan.c"
 +
@@ -5603,8 +5608,6 @@
 +	static bool started;
 +	int arg = 0;
 +	thread_t thread;
-+	/* Defined in fuxi_wlan_board.c, included at the end of this file. */
-+	extern void fuxi_wlan_board_init(void);
 +	if (started) {
 +		return;
 +	}
@@ -6189,7 +6192,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,756 @@
+@@ -0,0 +1,768 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6249,6 +6252,18 @@
 +#include <pexpert/pexpert.h>
 +#include <vm/vm_kern.h>
 +#include <vm/pmap.h>
++
++/*
++ * The board layer's exported entry points. fuxi_wlan.c carries its own
++ * prototype for fuxi_wlan_board_init (step 19 calls it long before this
++ * definition is reached); the rest are here so the compiler sees a prototype
++ * for every non-static function in this translation unit.
++ */
++void fuxi_wlan_board_init(void);
++const struct lx_platform *fuxi_wlan_board_platform(void);
++const struct nw_board *fuxi_wlan_board_table(void);
++int fuxi_wlan_board_start(void);
++unsigned fuxi_wlan_board_faults(void);
 +
 +#include "nw_abi.h"
 +

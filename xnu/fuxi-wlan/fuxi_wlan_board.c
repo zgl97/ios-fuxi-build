@@ -58,6 +58,18 @@
 #include <vm/vm_kern.h>
 #include <vm/pmap.h>
 
+/*
+ * The board layer's exported entry points. fuxi_wlan.c carries its own
+ * prototype for fuxi_wlan_board_init (step 19 calls it long before this
+ * definition is reached); the rest are here so the compiler sees a prototype
+ * for every non-static function in this translation unit.
+ */
+void fuxi_wlan_board_init(void);
+const struct lx_platform *fuxi_wlan_board_platform(void);
+const struct nw_board *fuxi_wlan_board_table(void);
+int fuxi_wlan_board_start(void);
+unsigned fuxi_wlan_board_faults(void);
+
 #include "nw_abi.h"
 
 /* ---- selector ---------------------------------------------------------- */

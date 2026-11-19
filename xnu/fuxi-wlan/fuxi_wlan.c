@@ -366,6 +366,11 @@ rh_send(unsigned t, uint32_t addr, uint32_t data)
 
 static bool wl_m6o_parf(void);
 static int wl_m6o_host(unsigned);
+/* Milestone 1 board layer, defined in fuxi_wlan_board.c at the end of this
+ * file. The prototype has to live up here: step 19 calls it, the definition
+ * comes 2,000 lines later, and a call without a prototype is implicitly
+ * int(void) — which then conflicts with the real void(void) definition. */
+extern void fuxi_wlan_board_init(void);
 #define FUXI_WLAN_XNU 1
 #include "wlan.c"
 
@@ -5571,8 +5576,6 @@ fuxi_wlan_init(void)
 	static bool started;
 	int arg = 0;
 	thread_t thread;
-	/* Defined in fuxi_wlan_board.c, included at the end of this file. */
-	extern void fuxi_wlan_board_init(void);
 	if (started) {
 		return;
 	}
