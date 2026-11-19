@@ -175,8 +175,9 @@ static struct wl_dma wl_msi_sink;
 
 static void wl_sleep(unsigned ms) { (void)ms; }
 static void delay_for_interval(unsigned us, uint64_t ns) { (void)us; (void)ns; }
-static void mp_disable_preemption(void) {}
-static void mp_enable_preemption(void) {}
+static int preempt_depth;
+static void disable_preemption(void) { preempt_depth++; }
+static void enable_preemption(void) { preempt_depth--; }
 
 static uint64_t mach_absolute_time(void) { return 1234567890ull; }
 static uint64_t mach_continuous_time(void) { return 9876543210ull; }
@@ -511,6 +512,17 @@ test_platform(void)
     assert(plat->dma_map && plat->dma_sync && plat->fw_get && plat->now_ns);
     assert(plat->boottime_ns && plat->busy_delay_us);
     assert(plat->preempt_disable && plat->preempt_enable);
+
+    /* The preemption hooks are no-ops while a host owns the board: the host
+     * runs on a thread it already controls, so there is nothing to disable.
+     * They must still be callable and must stay balanced. */
+    assert(preempt_depth == 0);
+    plat->preempt_disable();
+    plat->preempt_disable();
+    assert(preempt_depth == 0);
+    plat->preempt_enable();
+    plat->preempt_enable();
+    assert(preempt_depth == 0);
 
     /* now_ms is derived from now_ns, and boottime is its own clock. */
     assert(plat->now_ns() == 1234567890ull * 41);
