@@ -6182,7 +6182,7 @@
 
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,753 @@
+@@ -0,0 +1,754 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6666,7 +6666,7 @@
 +		wl_board_free(buf);
 +		return 1;
 +	}
-+	printf("FUXI WLAN: L1 firmware %s bytes %zu\n", staged, bytes);
++	printf("FUXI WLAN: L1 firmware %s bytes %lu\n", staged, (unsigned long)bytes);
 +	*data = buf;
 +	*size = bytes;
 +	return 0;
@@ -6868,8 +6868,9 @@
 +	wl_board.cfg_write = wl_board_cfg_write;
 +	wl_board.msi_target = wl_board_msi_target;
 +	wl_board.map_phys = NULL;
-+	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%zu irq base %d\n",
-+	    device, msi, pcie, (uint64_t)WL_BAR0, wl_board.bar_len, wl_board.irq_base);
++	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%lu irq base %d\n",
++	    device, msi, pcie, (uint64_t)WL_BAR0, (unsigned long)wl_board.bar_len,
++	    wl_board.irq_base);
 +	return 0;
 +}
 +

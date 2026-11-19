@@ -481,7 +481,7 @@ wl_board_fw_load(const char *staged, uint8_t **data, size_t *size)
 		wl_board_free(buf);
 		return 1;
 	}
-	printf("FUXI WLAN: L1 firmware %s bytes %zu\n", staged, bytes);
+	printf("FUXI WLAN: L1 firmware %s bytes %lu\n", staged, (unsigned long)bytes);
 	*data = buf;
 	*size = bytes;
 	return 0;
@@ -683,8 +683,9 @@ wl_board_prepare(void)
 	wl_board.cfg_write = wl_board_cfg_write;
 	wl_board.msi_target = wl_board_msi_target;
 	wl_board.map_phys = NULL;
-	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%zu irq base %d\n",
-	    device, msi, pcie, (uint64_t)WL_BAR0, wl_board.bar_len, wl_board.irq_base);
+	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%lu irq base %d\n",
+	    device, msi, pcie, (uint64_t)WL_BAR0, (unsigned long)wl_board.bar_len,
+	    wl_board.irq_base);
 	return 0;
 }
 
