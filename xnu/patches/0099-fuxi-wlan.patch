@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5506 @@
+@@ -0,0 +1,5579 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -790,6 +790,30 @@
 +#define WL17_CLKON 0x080u
 +#define WL17_ERRDEC 0x100u
 +#define WL17_MASK 0x1fcu
++
++/* fuxiwlanfix=<bits>: M2-a candidate-difference switches. Each bit turns ONE
++ * confirmed fuxi/ath12k divergence into ath12k behaviour so a single CI build
++ * can bisect the WLAN_MODE assertion. Default 0 keeps every r485 behaviour.
++ *   0x1 BDFID     BDF file_id 0xff when CAP reports no board id (ath12k
++ *                 ATH12K_BOARD_ID_DEFAULT); r485 sent 0
++ *   0x2 MLOGATE   send PHY_CAP 0x57 unconditionally and start with MLO off,
++ *                 enabling it only on PHY_CAP TLV 0x13 (ath12k truth chain);
++ *                 r485 sent no PHY_CAP yet still emitted MLO TLVs 0x21-0x26
++ *   0x4 ERINTMOD  write event-context intmod/msivec (ath12k 0/1 ms, 1/2;
++ *                 sheng writes the same); r485 left both zero
++ *   0x8 LIMITHI   MHICTRLLIMIT/MHIDATALIMIT high word 0xf (36-bit DMA mask);
++ *                 r485 wrote 0
++ *   0x10 RAILORDER vote mode(7) before enable(1), as Linux regulator_do_enable
++ *                 (set_voltage, set_mode, ops->enable) and sheng
++ *                 (WifiProbe.cpp:349-351) both do; r485 wrote enable first
++ */
++#define WLFIX_BDFID 0x1u
++#define WLFIX_MLOGATE 0x2u
++#define WLFIX_ERINTMOD 0x4u
++#define WLFIX_LIMITHI 0x8u
++#define WLFIX_RAILORDER 0x10u
++static unsigned wl_fix_bits;
++static bool wl_phycap_opt;
 +static unsigned wl17_bits;
 +static unsigned wl17_phy17_len;
 +static uint64_t wl17_phy17_val;
@@ -1048,6 +1072,21 @@
 +	(void)PE_parse_boot_argn("fuxiwlanqrtr", &qrtr, sizeof(qrtr));
 +	wl_w15 = qrtr == 5; wl_w14 = qrtr == 4 || wl_w15; wl_w13 = qrtr == 3 || wl_w14; wl_w12 = qrtr == 2 || wl_w13; wl_qrtr = qrtr == 1 || wl_w12; wl_w11_attempted = wl_w11_ok = false;
 +	wl12_mlo_variant = 0; wl17_bits = 0;
++	wl_fix_bits = 0; wl_phycap_opt = false;
++	{
++		int fix = 0;
++		if (PE_parse_boot_argn("fuxiwlanfix", &fix, sizeof(fix))) {
++			if (fix < 0 || fix > 0x1f) {
++				wl_variant_invalid = true;
++			} else {
++				wl_fix_bits = (unsigned)fix;
++			}
++			printf("FUXI WLAN: M2a fix bits %#x (bdfid %u mlogate %u erintmod %u limithi %u railorder %u) valid %u\n",
++			    wl_fix_bits, !!(wl_fix_bits & WLFIX_BDFID), !!(wl_fix_bits & WLFIX_MLOGATE),
++			    !!(wl_fix_bits & WLFIX_ERINTMOD), !!(wl_fix_bits & WLFIX_LIMITHI),
++			    !!(wl_fix_bits & WLFIX_RAILORDER), !wl_variant_invalid);
++		}
++	}
 +	{
 +		int variant = 0;
 +		bool present = PE_parse_boot_argn("fuxiwlanmlo", &variant, sizeof(variant));
@@ -2625,8 +2664,15 @@
 +		}
 +	}
 +	for (unsigned i = 0; i < 6; i++) {
-+		const unsigned values[] = {wl_rails[i].mv, 1, 7};
-+		const char *const kinds[] = {"voltage-mV", "enable", "mode-HPM/PWM"};
++		/* RAILORDER: Linux regulator_do_enable sets voltage, then mode, then
++		 * calls ops->enable; sheng sends mode(7), voltage, enable
++		 * (WifiProbe.cpp:349-351). r485 sent enable before mode. */
++		const unsigned values_lpm[] = {wl_rails[i].mv, 1, 7};
++		const char *const kinds_lpm[] = {"voltage-mV", "enable", "mode-HPM/PWM"};
++		const unsigned values_hpm[] = {wl_rails[i].mv, 7, 1};
++		const char *const kinds_hpm[] = {"voltage-mV", "mode-HPM/PWM", "enable"};
++		const unsigned *values = (wl_fix_bits & WLFIX_RAILORDER) ? values_hpm : values_lpm;
++		const char *const *kinds = (wl_fix_bits & WLFIX_RAILORDER) ? kinds_hpm : kinds_lpm;
 +		for (unsigned reg = 0; reg < 3; reg++) {
 +			unsigned addr = wl_rails[i].addr + 4*reg;
 +			printf("FUXI WLAN: rails begin %s %s addr %#x value %u\n",
@@ -3968,8 +4014,9 @@
 +		for (int i = 0; i < links; i++) { info[2+i] = (uint8_t)i; info[4+i] = 1; }
 +		memcpy(e->data+e->len, info, sizeof(info)); e->len += sizeof(info);
 +	}
-+	if (wl12_mlo_variant || wl17_bits) {
-+		printf("FUXI WLAN: W12 host cap MLO TLVs %s num_phy %u\n", mlo ? "present" : "omitted", wl12_num_phy);
++	if (wl12_mlo_variant || wl17_bits || (wl_fix_bits & WLFIX_MLOGATE)) {
++		printf("FUXI WLAN: W12 host cap MLO TLVs %s num_phy %u mlo_enabled %u links %d\n",
++		    mlo ? "present" : "omitted", wl12_num_phy, wl12_mlo_enabled, links);
 +	}
 +	if (wl12_tlv(e, 0x27, 0x18, 8)) { return 1; }
 +	if (wl17_bits & WL17_HOSTMEM) {
@@ -4193,7 +4240,7 @@
 +wl_qmi_w12(const uint8_t *p, unsigned len)
 +{
 +	const char *lane = wl_w15 && wl12_stage >= WL15_INI ? "W15" : "W12";
-+	if (len >= 7 && p[0] == 2 && wl12_mlo_variant == 1 && wl12_msg == 0x57 &&
++	if (len >= 7 && p[0] == 2 && wl_phycap_opt && wl12_msg == 0x57 &&
 +	    !wl12_reply && wl_get16(p+1) == wl12_txn && wl_get16(p+3) == 0x57) {
 +		return wl12_phy_reply(p, len);
 +	}
@@ -4575,7 +4622,7 @@
 +		if (wl16_variant && wl12_stage == WL15_MODE && ms == 1000) { wl16_snapshot("MODE pending 1000 ms"); }
 +		if (ms < 10000) { wl_sleep(10); }
 +	}
-+	if (wl12_mlo_variant == 1 && wl12_msg == 0x57) {
++	if (wl_phycap_opt && wl12_msg == 0x57) {
 +		printf("FUXI WLAN: W12 phy cap fallback num_phy 2 (timeout 10000 ms)\n");
 +		return 0; /* ath12k_qmi_phy_cap_send is optional; transport faults are fatal above. */
 +	}
@@ -4676,8 +4723,13 @@
 +    unsigned remaining, unsigned seg, unsigned type)
 +{
 +	unsigned n = remaining > WL14_SEG ? WL14_SEG : remaining;
++	/* ath12k sends req->file_id = target.board_id, which is
++	 * ATH12K_BOARD_ID_DEFAULT (0xff) when the CAP reply carried no board id.
++	 * r485 sent 0; WLFIX_BDFID switches to the ath12k value. */
++	uint32_t file_id = wl14_board;
++	if ((wl_fix_bits & WLFIX_BDFID) && !wl14_board_valid) { file_id = 0xffu; }
 +	if (!n || e->len != 7 || type > 4 ||
-+	    wl12_tlv(e, 1, 1, 1) || wl12_tlv(e, 0x10, wl14_board, 4) ||
++	    wl12_tlv(e, 1, 1, 1) || wl12_tlv(e, 0x10, file_id, 4) ||
 +	    wl12_tlv(e, 0x11, remaining, 4) || wl12_tlv(e, 0x12, seg, 4)) { return wl_w11_fail("W14 segment bounds"); }
 +	/* EI data_len is u16 within TLV 0x13; valid flags are presence only.
 +	 * ath12k total_size is REMAINING on every segment, not original size. */
@@ -4760,7 +4812,10 @@
 +{
 +	// Unprogrammed OTP omits board_info; ath12k then uses board id 0xff. The
 +	// BDF here comes from fuxiwlanbdf (or its default), not from the id.
-+	if (!wl14_board_valid) { printf("FUXI WLAN: W14 CAP has no board id (OTP unset); ath12k default 0xff, BDF by name\n"); }
++	if (!wl14_board_valid) {
++		printf("FUXI WLAN: W14 CAP has no board id (OTP unset); ath12k default 0xff, BDF by name%s\n",
++		    (wl_fix_bits & WLFIX_BDFID) ? "; fix bdfid -> file_id 0xff" : "");
++	}
 +	if (wl14_download("regdb_xiaomi.bin", &wl14_regdb, WL14_REGDB) ||
 +	    wl14_download(wl14_bdf_name, &wl14_bdf, WL14_BDF)) { return 1; }
 +	unsigned size = 0;
@@ -4799,11 +4854,18 @@
 +	static struct wl12_encoder e;
 +	bzero(&e, sizeof(e)); e.len = 7;
 +	wl_target_n = 0; wl_target_total = 0;
-+	wl12_num_phy = 2; wl12_mlo_enabled = true;
++	wl12_num_phy = 2;
++	/* ath12k starts with single_chip_mlo_support=false and only sets it from
++	 * PHY_CAP reply TLV 0x13; mlo_capable stays false when no reply arrives,
++	 * so the whole MLO TLV group is skipped. r485 hardcoded true and still
++	 * emitted 0x21-0x26. WLFIX_MLOGATE reproduces the ath12k truth chain. */
++	wl12_mlo_enabled = !(wl_fix_bits & WLFIX_MLOGATE);
 +	/* ath12k_qmi_event_server_arrive: PHY_CAP before IND_REGISTER/HOST_CAP.
 +	 * Its request EI is EOTI only: zero TLVs, seven-byte QMI header.
 +	 * Discovery stage stays zero until IND_REGISTER; old stage IDs unchanged. */
-+	if (wl12_mlo_variant == 1) {
++	wl_phycap_opt = false;
++	if (wl12_mlo_variant == 1 || (wl_fix_bits & WLFIX_MLOGATE)) {
++		wl_phycap_opt = true;
 +		if (wl12_send(&e, 0x57, WL12_DISCOVERY) || wl12_wait(0, "PHY_CAP reply")) { return 1; }
 +		bzero(&e, sizeof(e)); e.len = 7;
 +	}
@@ -4951,6 +5013,14 @@
 +		for (unsigned i = 0; i < 2; i++) {
 +			e[i].type = 1; e[i].base = e[i].rp = wl_contexts.iova + (i ? WL_ER1 : WL_ER0);
 +			e[i].len = i ? 4096 : 512; e[i].wp = e[i].base + e[i].len - 16;
++			if (wl_fix_bits & WLFIX_ERINTMOD) {
++				/* ath12k mhi_init_dev_ctxt: intmod = mhi_event->intmod in
++				 * the INTMODT field [31:16] (er0 0 ms, er1 1 ms), and
++				 * msivec = mhi_event->irq (er0 1, er1 2). sheng writes the
++				 * same pair. */
++				e[i].cfg = (i ? 1u : 0u) << 16;
++				e[i].index = i + 1;
++			}
 +		}
 +		struct wl_context *c = (struct wl_context *)(wl_contexts.va + WL_CCTX);
 +		c->base = c->rp = c->wp = wl_contexts.iova + WL_CR; c->len = 2048;
@@ -5111,12 +5181,15 @@
 +		    (wl_mrd(0x10) & 255) != 128) { return 1; }
 +		wl_mwr64(0x58, wl_contexts.iova); wl_mwr64(0x60, wl_contexts.iova + WL_ECTX);
 +		wl_mwr64(0x68, wl_contexts.iova + WL_CCTX);
-+		wl_mwr64(0x80, 0); wl_mwr64(0x88, 0xffffffffull);
-+		wl_mwr64(0x98, 0); wl_mwr64(0xa0, 0xffffffffull);
++		/* ath12k iova_stop = DMA_BIT_MASK(36) = 0xf_ffffffff, so the high
++		 * words of MHICTRLLIMIT/MHIDATALIMIT are 0xf. r485 wrote 0. */
++		uint64_t limit = (wl_fix_bits & WLFIX_LIMITHI) ? 0xfffffffffull : 0xffffffffull;
++		wl_mwr64(0x80, 0); wl_mwr64(0x88, limit);
++		wl_mwr64(0x98, 0); wl_mwr64(0xa0, limit);
 +		wl_mwr(0x10, (wl_mrd(0x10) & 0xffff) | (2u << 16));
 +		const unsigned off[] = {0x58, 0x60, 0x68, 0x80, 0x88, 0x98, 0xa0};
 +		const uint64_t val[] = {wl_contexts.iova, wl_contexts.iova + WL_ECTX,
-+		    wl_contexts.iova + WL_CCTX, 0, 0xffffffffull, 0, 0xffffffffull};
++		    wl_contexts.iova + WL_CCTX, 0, limit, 0, limit};
 +		for (unsigned i = 0; i < sizeof(off)/sizeof(off[0]); i++) {
 +			if (wl_mrd(off[i]) != (uint32_t)val[i] ||
 +			    wl_mrd(off[i]+4) != (uint32_t)(val[i]>>32) || fw_faults) { return 2; }

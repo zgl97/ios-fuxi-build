@@ -86,6 +86,8 @@ static int old_iova_arg;
 static bool old_iova_present;
 static int clock_arg, iboff_arg;
 static int aspm_arg, stop22_arg, keep_arg, qrtr_arg, mlo_arg, ltr_arg, chunk_arg;
+static int fix_arg;
+static bool fix_present;
 static bool mlo_present;
 static const char *probe_arg, *pre_arg, *bhi_arg, *vec_arg, *fw_arg, *cnss_arg, *seq_arg;
 static unsigned cache_attrs[32][1024];
@@ -121,6 +123,7 @@ static bool PE_parse_boot_argn(const char *name, void *out, int size) {
     if(!strcmp(name,"fuxiwlanstop22")) { memcpy(out,&stop22_arg,size); return true; }
     if(!strcmp(name,"fuxiwlankeep")) { memcpy(out,&keep_arg,size); return true; }
     if(!strcmp(name,"fuxiwlanqrtr")) { memcpy(out,&qrtr_arg,size); return true; }
+    if(!strcmp(name,"fuxiwlanfix")) { memcpy(out,&fix_arg,size); return fix_present; }
     if(!strcmp(name,"fuxiwlanltr")) { memcpy(out,&ltr_arg,size); return true; }
 if(!strcmp(name,"fuxiwlanchunk")) { memcpy(out,&chunk_arg,size); return true; }
     assert(!strcmp(name,"fuxiwlanoldiova"));
@@ -286,6 +289,7 @@ static void init(void) {
     memset(&wl_ipcr,0,sizeof(wl_ipcr)); memset(&wl_amss,0,sizeof(wl_amss)); memset(&wl_image,0,sizeof(wl_image)); memset(&wl_vectors,0,sizeof(wl_vectors));
     memset(&wl_tables,0,sizeof(wl_tables)); wl_owned=wl_enabled=wl_route_owned=wl_route_installed=false;
     old_iova_arg=0; old_iova_present=false; probe_arg=NULL; aspm_arg=stop22_arg=keep_arg=qrtr_arg=mlo_arg=ltr_arg=chunk_arg=0; mlo_present=false;
+    fix_arg=0; fix_present=false;
     pre_arg=bhi_arg=vec_arg=fw_arg=cnss_arg=seq_arg=NULL;
     wl_seq_undos=wl_eq_bank=wl_msi_cap=wl_pm_cap=0; wl_cycle_attempted=wl_cycle_powered=wl_msi_pvm=wl_link_off=wl_dbi_ready=false; wl3_faults=0;
     memset(&wl_msi_sink,0,sizeof(wl_msi_sink));

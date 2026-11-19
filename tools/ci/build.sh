@@ -273,6 +273,7 @@ kernel() {
         python3 tools/test-fuxi-wlan-w16.py
         python3 tools/test-fuxi-wlan-w17.py
         python3 tools/test-fuxi-wlan-rails.py
+        python3 tools/test-fuxi-wlan-m2a.py
         shasum -a 256 xnu/fuxi-wlan/fuxi_wlan.c xnu/patches/0099-fuxi-wlan.patch \
             shim/fuxi-probe/wlan.c > "$out/wlan-source-SHA256SUMS.txt"
     fi

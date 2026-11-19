@@ -44,7 +44,12 @@ static void ts_gpio(unsigned n,unsigned func,unsigned pull,unsigned ma,int out) 
     # GPIO constants/state must be visible to usb_rd, not only ts_gpio.
     pre = pre.replace('#define WL_GCC', '#define WL_TLMM 0xf100000ull\nstatic unsigned gpio_high;\n#define WL_GCC', 1)
     transport = '#define RH_STRIDE' + driver.split('#define RH_STRIDE', 1)[1].split('#define FUXI_WLAN_XNU', 1)[0]
-    rails = '/* ---- opt-in ON-only' + driver.split('/* ---- opt-in ON-only', 1)[1].split('/* ---- end opt-in ON-only rail re-votes ---- */', 1)[0]
+    # The rail block reads the M2-a fix switches, which live far above it in the
+    # driver and are therefore outside the extracted transport/rails slices.
+    fixes = ('/* fuxiwlanfix=<bits>' +
+             driver.split('/* fuxiwlanfix=<bits>', 1)[1].split('static bool wl_phycap_opt;', 1)[0] +
+             'static bool wl_phycap_opt;\n')
+    rails = fixes + '/* ---- opt-in ON-only' + driver.split('/* ---- opt-in ON-only', 1)[1].split('/* ---- end opt-in ON-only rail re-votes ---- */', 1)[0]
     accessors = '\n'.join(line for line in shim.splitlines()
                           if line.startswith(('static uint8_t wl_cdb8(', 'static uint32_t wl_cdb16(')))
     icc = '/* ---- milestone 6i:' + driver.split('/* ---- milestone 6i:', 1)[1].split('/* ---- end milestone 6i ---- */', 1)[0]
@@ -99,6 +104,22 @@ int main(void) {
             assert(strstr(logs,"addr 0x40208 value 7 completion 0"));
         } else assert(!strstr(logs,"rails variant"));
     }
+    /* WLFIX_RAILORDER: mode(7) precedes enable(1), as Linux regulator_do_enable
+     * and sheng (WifiProbe.cpp:349-351) both order them. */
+    boot(1); wl_fix_bits = WLFIX_RAILORDER; fw_run(3);
+    assert(!wl5_report[3] && gpio_high==1 && nsent==30);
+    {
+        const unsigned addr[]={0x40a00,0x44000,0x40400,0x40200,0x40600,0x40500};
+        const unsigned mv[]={1800,1000,980,950,1900,1350};
+        for(unsigned i=12;i<30;i++) {
+            struct sent *s=&sent[i]; unsigned reg=(i-12)%3;
+            assert(s->addr==addr[(i-12)/3]+4*reg);
+            assert(s->data==(reg==0?mv[(i-12)/3]:(reg==1?7:1)));
+        }
+        assert(strstr(logs,"mode-HPM/PWM addr 0x40204 value 7 completion 0"));
+        assert(strstr(logs,"enable addr 0x40208 value 1 completion 0"));
+    }
+    wl_fix_bits = 0;
     for(unsigned idx=0;idx<6;idx++) {
         boot(1); corrupt_idx=idx; fw_run(3);
         assert(wl5_report[3] && !gpio_high && nsent==12 && strstr(logs,"rails skip"));
