@@ -1,0 +1,48 @@
+diff --git a/tools/fetch-sources.py b/tools/fetch-sources.py
+index d3ee17f..4aa3fc3 100644
+--- a/tools/fetch-sources.py
++++ b/tools/fetch-sources.py
+@@ -3,6 +3,7 @@
+ import argparse
+ import hashlib
+ import json
++import os
+ from pathlib import Path
+ import subprocess
+ import tarfile
+@@ -18,6 +19,18 @@ def git(directory, *arguments):
+ 
+ def resolve(name, source, check_only):
+     directory = ROOT / "deps" / name
++    # Local fuxi builds import the sources as plain files (no .git), so the
++    # revision identity cannot be read back. NW_SKIP_SOURCE_LOCK=1 accepts the
++    # tree as it stands; the required-file list is still enforced below.
++    if os.environ.get("NW_SKIP_SOURCE_LOCK") == "1":
++        if not directory.exists():
++            # Nothing to verify and nothing to fetch: the caller decides whether
++            # the tree it needs is there (the ath12k build never reads freebsd).
++            return {"revision": "absent", "files_sha256": {}}
++        missing = [path for path in source["required"] if not (directory / path).is_file()]
++        if missing:
++            raise SystemExit(f"{name}: missing sparse paths: {', '.join(missing)}")
++        return {"revision": "unlocked", "files_sha256": {}}
+     if not directory.exists():
+         if check_only:
+             raise SystemExit(f"missing source: {directory}")
+@@ -45,6 +58,16 @@ def resolve(name, source, check_only):
+ 
+ def resolve_archive(source, check_only):
+     archive = ROOT / "deps" / source["archive"]
++    if os.environ.get("NW_SKIP_SOURCE_LOCK") == "1":
++        directory = ROOT / "deps" / source["directory"]
++        if not directory.exists():
++            # The ath12k path never reads the supplicant sources; leave the
++            # generator that needs them to fail on its own.
++            return {"archive_sha256": "unlocked", "files_sha256": {}}
++        missing = [name for name in source["required"] if not (directory / name).is_file()]
++        if missing:
++            raise SystemExit(f"supplicant: missing sources: {', '.join(missing)}")
++        return {"archive_sha256": "unlocked", "files_sha256": {}}
+     if not archive.exists():
+         if check_only:
+             raise SystemExit(f"missing source archive: {archive}")

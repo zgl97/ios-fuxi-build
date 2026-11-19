@@ -24,6 +24,10 @@ on:
         description: Signed Vulkan probe/smoke and GPU ABI test
         type: boolean
         default: false
+      ath12k:
+        description: Compile-only audit of the Ath12kWifi Linux stack (125 objects; links nothing)
+        type: boolean
+        default: false
       runner:
         description: Hosted macOS image (macos-14 is unsupported from 2026-11-02)
         type: choice
@@ -62,6 +66,7 @@ jobs:
           NATIVEMETAL: ${{ inputs.nativemetal }}
           MESA: ${{ inputs.mesa }}
           TOOLS: ${{ inputs.tools }}
+          FUXI_ATH12K: ${{ inputs.ath12k }}
         run: |
           matrix=$(bash tools/ci/build.sh --plan "$KERNEL" "$METAL" "$MESA" "$TOOLS" "$NATIVEMETAL")
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
@@ -107,18 +112,19 @@ jobs:
           ls -d /Applications/Xcode*.app
           [[ -d $DEVELOPER_DIR ]] || { echo "::error::Xcode $XCODE_VERSION is not installed on $ImageOS"; exit 1; }
           [[ -z $IIG_RUN || $FUXI_IIG_MODE == replay ]] || { echo '::error::iig_run needs iig_mode=replay'; exit 1; }
-          [[ $TARGET != kernel-* || $TARGET == kernel-ios27 || $FUXI_IIG_MODE == replay || $(xcodebuild -version | head -1) == 'Xcode 15.'* ]] ||
+          # kernel-ath12k runs no iig at all: it compiles the Linux stack and links nothing.
+          [[ $TARGET != kernel-* || $TARGET == kernel-ios27 || $TARGET == kernel-ath12k || $FUXI_IIG_MODE == replay || $(xcodebuild -version | head -1) == 'Xcode 15.'* ]] ||
             { echo "::error::kernel iig_mode=$FUXI_IIG_MODE needs Xcode 15; use iig_mode=replay"; exit 1; }
       # Only XNU-derived iig outputs (APSL source text, hash manifest); no tool binaries.
       - uses: actions/download-artifact@v4
-        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && inputs.iig_mode == 'replay' && inputs.iig_run != ''
+        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && matrix.target != 'kernel-ath12k' && inputs.iig_mode == 'replay' && inputs.iig_run != ''
         with:
           pattern: fuxi-iig-pregen-*
           path: deps/iig-pregen-download
           run-id: ${{ inputs.iig_run }}
           github-token: ${{ github.token }}
       - name: Choose pregenerated iig outputs
-        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && inputs.iig_mode == 'replay' && inputs.iig_run != ''
+        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && matrix.target != 'kernel-ath12k' && inputs.iig_mode == 'replay' && inputs.iig_run != ''
         run: |
           set -- deps/iig-pregen-download/*/
           [[ -f $1/manifest.json ]] || { echo "::error::run $IIG_RUN has no fuxi-iig-pregen-* artifact"; exit 1; }
@@ -135,7 +141,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - uses: actions/upload-artifact@v4
-        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && inputs.iig_mode != 'xcode'
+        if: startsWith(matrix.target, 'kernel-') && matrix.target != 'kernel-ios27' && matrix.target != 'kernel-ath12k' && inputs.iig_mode != 'xcode'
         with:
           name: fuxi-iig-pregen-${{ matrix.target }}
           path: tools/out/ci/${{ matrix.target }}/iig-pregen/

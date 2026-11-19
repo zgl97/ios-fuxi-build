@@ -5,12 +5,15 @@ root=$(cd "$(dirname "$0")/../.." && pwd)
 usage() {
     cat <<'HELP'
 Usage: tools/ci/build.sh TARGET [--dry-run]
-Targets: kernel-metal4, kernel-wlan6g, kernel-metal4e, kernel-ios27, metal, nativemetal, mesa, tools
-       tools/ci/build.sh --plan KERNEL METAL MESA TOOLS [NATIVEMETAL]
+Targets: kernel-metal4, kernel-wlan6g, kernel-metal4e, kernel-ios27, kernel-ath12k, metal, nativemetal, mesa, tools
+       tools/ci/build.sh --plan KERNEL METAL MESA TOOLS [NATIVEMETAL] [ATH12K]
 KERNEL: none|metal4|wlan6g|metal4e|ios27|all; remaining plan arguments: true|false
 metal4e is the opt-in arm64e build of the metal4 kernel (FUXI_ARM64E=1, patch 0115); all does not include it.
 ios27 is the iOS 27 kernel (xnu-12377 + xnu27/series, tools/ci/build-xnu27.sh): it
 needs Xcode 26 or newer with ld-classic, ignores FUXI_IIG_MODE; all does not include it.
+ath12k compiles the 125 objects of the Ath12kWifi Linux Wi-Fi stack for arm64
+and audits them against this kernel's exports. It links nothing: the objects are
+evidence for the port's next milestone, not a kext.
 Outputs: tools/out/ci/TARGET/ (explicit allowlist, logs, SHA256SUMS)
 Caches: deps/ci-downloads/; isolated build directories: deps/ci-work-TARGET/
 Requires a Mac with preinstalled Xcode 15.4 (kernel) or a selected full Xcode
@@ -27,15 +30,20 @@ case "$1" in
     --plan)
         [[ $# == 5 || $# == 6 ]] || die '--plan needs KERNEL METAL MESA TOOLS [NATIVEMETAL]'
         case "$2" in none|metal4|wlan6g|metal4e|ios27|all) ;; *) die 'invalid kernel selection' ;; esac
-        for flag in "$3" "$4" "$5" "${6:-false}"; do
+        for flag in "$3" "$4" "$5" "${6:-false}" "${FUXI_ATH12K:-false}"; do
             [[ $flag == true || $flag == false ]] || die 'plan flags must be true or false'
         done
-        python3 - "$2" "$3" "$4" "$5" "${6:-false}" <<'PY'
+        python3 - "$2" "$3" "$4" "$5" "${6:-false}" "${FUXI_ATH12K:-false}" <<'PY'
 import json, sys
-kernel, *flags = sys.argv[1:]
+kernel, metal, mesa, tools, nativemetal, ath12k = sys.argv[1:]
 targets = ["kernel-" + v for v in ("metal4", "wlan6g") if kernel in (v, "all")]
 targets += ["kernel-" + kernel] if kernel in ("metal4e", "ios27") else []
-targets += [t for t, f in zip(("metal", "mesa", "tools", "nativemetal"), flags) if f == "true"]
+targets += [t for t, f in zip(("metal", "mesa", "tools", "nativemetal"), (metal, mesa, tools, nativemetal)) if f == "true"]
+# kernel-ath12k compiles the Linux stack, which no kernel profile depends on:
+# it is selected on its own so an object-level regression cannot be mistaken
+# for a kernel one.
+if ath12k == "true":
+    targets += ["kernel-ath12k"]
 if not targets:
     raise SystemExit("Select at least one target")
 print(json.dumps({"target": targets}))
@@ -44,7 +52,7 @@ PY
 esac
 target=$1
 shift
-case "$target" in kernel-metal4|kernel-wlan6g|kernel-metal4e|kernel-ios27|metal|nativemetal|mesa|tools) ;; *) die "unknown target: $target" ;; esac
+case "$target" in kernel-metal4|kernel-wlan6g|kernel-metal4e|kernel-ios27|kernel-ath12k|metal|nativemetal|mesa|tools) ;; *) die "unknown target: $target" ;; esac
 dry=false
 if [[ $# == 1 && $1 == --dry-run ]]; then dry=true; shift; fi
 [[ $# == 0 ]] || die 'unexpected arguments'
@@ -67,10 +75,16 @@ if $dry; then
         echo 'No downloads, builds, signing or packing in dry-run mode.'
         exit 0
     fi
-    [[ $target != kernel-* ]] || printf 'iig=%s cache=%s\n' "$iig_mode" "${FUXI_IIG_CACHE:-xnu/iig-pregen}"
+    [[ $target != kernel-* || $target == kernel-ath12k ]] || printf 'iig=%s cache=%s\n' "$iig_mode" "${FUXI_IIG_CACHE:-xnu/iig-pregen}"
     printf 'pins: dxb=%s mesa=%s metal2vulkan=%s rust=%s\n' "$DXB_SHA" "$MESA_SHA" "$M2V_SHA" "$RUST_VERSION"
     if [[ $target == kernel-metal4e ]]; then
         echo 'kernel: arm64e (FUXI_ARM64E=1, patch 0115), metal4 cmdline + cmdline-cpus1.txt, needs ld-classic'
+    fi
+    if [[ $target == kernel-ath12k ]]; then
+        printf 'ath12k: %s=%s linux=%s supplicant=%s\n' "$ATH12K_SHA" "$ATH12K_URL" "$LINUX_SHA256" "$SUPPLICANT_SHA256"
+        echo 'outputs: ath12k-objects.txt ath12k-count.txt ath12k-{undefined,defined,external,libc,needs-kernel,globals}.txt objects/ ath12k-logs/'
+        echo '         ath12k-gap-*.txt and ath12k-collisions.txt only when FUXI_ATH12K_KERNEL names a kernel binary'
+        echo 'Nothing is linked into the kernel and no boot image is packed.'
     fi
     echo 'No downloads, builds, signing or packing in dry-run mode.'
     exit 0
@@ -190,6 +204,9 @@ setup() {
     for cmd in cmake ninja; do command -v "$cmd" >/dev/null || die "runner lacks $cmd"; done
     case "$target" in
         kernel-ios27) command -v unifdef >/dev/null || die 'runner lacks unifdef' ;;
+        # The Linux stack is compiled straight with xcrun's clang: it needs no
+        # pinned bash, no gum and no jq, and it never runs the XNU builder.
+        kernel-ath12k) ;;
         kernel-*) command -v jq >/dev/null || die 'runner lacks jq'
                   install_gum; install_bash ;;
         mesa) command -v pkg-config >/dev/null || die 'runner lacks pkg-config'
@@ -198,7 +215,7 @@ setup() {
     esac
     if [[ $target == kernel-ios27 ]]; then
         [[ -n ${DEVELOPER_DIR:-} ]] || die 'kernel-ios27 needs DEVELOPER_DIR (Xcode 26 or newer)'
-    elif [[ $target == kernel-* ]]; then
+    elif [[ $target == kernel-* && $target != kernel-ath12k ]]; then
         export DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode_15.4.app/Contents/Developer}
     else
         export DEVELOPER_DIR=${DEVELOPER_DIR:-$(xcode-select -p)}
@@ -211,7 +228,7 @@ setup() {
         major=$(xcodebuild -version | sed -n '1s/^Xcode \([0-9]*\).*/\1/p')
         [[ ${major:-0} -ge 26 ]] || die 'kernel-ios27 needs Xcode 26 or newer (xnu-12377 iig and SDK)'
         xcrun --find iig
-    elif [[ $target == kernel-* ]]; then
+    elif [[ $target == kernel-* && $target != kernel-ath12k ]]; then
         echo "IIG mode: $iig_mode"
         if [[ $iig_mode == replay ]]; then
             # Newer iig emits an IORPC ABI XNU 8796 lacks: never run it, replay
@@ -457,12 +474,79 @@ user_tools() {
     # Audit sidecars describe only our binaries and are useful with the logs.
 }
 
+kernel_ath12k() {
+    # Compile-only lane for the Ath12kWifi Linux Wi-Fi stack. It proves the
+    # object set a clean macOS toolchain produces, and audits what those objects
+    # ask the kernel for. It links nothing into the kernel: that decision needs
+    # the object evidence first, and the two failures that follow a bad object
+    # set (a missing export, a duplicate definition) are cheaper to read here
+    # than in a 26-minute kernel link.
+    local tree=$work/ath12k objects=$work/ath12k-out
+    bash tools/fuxi-ath12k-stage.sh "$tree" "$downloads"
+    bash tools/fuxi-ath12k-build.sh "$tree" "$objects"
+
+    # Objects and the two symbol lists are the artifact. The staged tree, with
+    # its thousands of symlinks, stays in $work: manifest() refuses symlinks.
+    cp -R "$objects/objects" "$out/objects"
+    cp "$objects/ath12k-objects.txt" "$objects/ath12k-undefined.txt" \
+       "$objects/ath12k-defined.txt" "$objects/ath12k-external.txt" \
+       "$objects/ath12k-libc.txt" "$objects/ath12k-needs-kernel.txt" \
+       "$objects/ath12k-globals.txt" "$out/"
+    cp -R "$objects/logs" "$out/ath12k-logs"
+    [[ ! -s $objects/ath12k-failures.txt ]] || cp "$objects/ath12k-failures.txt" "$out/"
+
+    # The gap against this kernel's exports, and the names this stack defines
+    # that the kernel also defines, are only meaningful against a kernel binary.
+    # When the caller supplies one, record both; otherwise say so in the artifact
+    # rather than implying an audit that never ran.
+    #
+    # Two gaps are reported, because the honest answer depends on a decision not
+    # yet made: ath12k-external.txt is everything the objects need from outside,
+    # and every one of those may come from the kernel; ath12k-needs-kernel.txt
+    # drops the C library names the shim could still supply. A single number
+    # would hide which of the two the port will actually rely on.
+    if [[ -n ${FUXI_ATH12K_KERNEL:-} ]]; then
+        python3 tools/ci/kernel-exports.py "$FUXI_ATH12K_KERNEL" > "$work/kernel-exports.txt"
+        local exports_count
+        exports_count=$(wc -l < "$work/kernel-exports.txt" | tr -d ' ')
+        {
+            printf 'kernel=%s exports=%s\n' "$FUXI_ATH12K_KERNEL" "$exports_count"
+            for pair in "external:$objects/ath12k-external.txt" "needs-kernel:$objects/ath12k-needs-kernel.txt"; do
+                label=${pair%%:*}; list=${pair#*:}
+                comm -23 "$list" "$work/kernel-exports.txt" > "$out/ath12k-gap-$label.txt"
+                printf '%s=%s missing=%s\n' "$label" "$(wc -l < "$list" | tr -d ' ')" \
+                    "$(wc -l < "$out/ath12k-gap-$label.txt" | tr -d ' ')"
+            done
+        } | tee "$out/ath12k-link-gap-summary.txt"
+        # A name the stack defines and the kernel also exports is not a link
+        # failure for a kext (the stack's own definition wins inside its own
+        # image) but it is a real collision once these objects join the kernel,
+        # so it is recorded rather than ignored.
+        cut -f1 "$objects/ath12k-globals.txt" | sort -u > "$work/globals.txt"
+        comm -12 "$work/globals.txt" "$work/kernel-exports.txt" > "$out/ath12k-collisions.txt"
+        printf 'collisions=%s\n' "$(wc -l < "$out/ath12k-collisions.txt" | tr -d ' ')" \
+            | tee -a "$out/ath12k-link-gap-summary.txt"
+    else
+        echo 'No FUXI_ATH12K_KERNEL: symbols recorded, the gaps and collisions against kernel exports were not computed.' \
+            | tee "$out/ath12k-link-gap-summary.txt"
+    fi
+
+    # One object per line of sources.txt, and two objects that share a name would
+    # mean one silently replaced the other. Count both sides.
+    local expected counted
+    expected=$(grep -cvE '^\s*(#|$)' "$tree/tools/sources.txt")
+    counted=$(wc -l < "$out/ath12k-objects.txt" | tr -d ' ')
+    printf 'sources=%s objects=%s\n' "$expected" "$counted" | tee "$out/ath12k-count.txt"
+    [[ $expected == "$counted" ]] || die "sources.txt names $expected sources but $counted objects were recorded"
+}
+
 build() {
     setup
     printf 'Repository: %s\nTarget: %s\n' "$(git rev-parse HEAD)" "$target"
     cat tools/ci/pins.env
     case "$target" in
         kernel-ios27) kernel_ios27 ;;
+        kernel-ath12k) kernel_ath12k ;;
         kernel-*) kernel ;;
         metal|nativemetal) metal ;;
         mesa) mesa ;;
