@@ -20,7 +20,10 @@ def main() -> int:
         print('usage: extract-linux-subset.py ARCHIVE DEST PATHS_FILE', file=sys.stderr)
         return 2
     archive, dest, paths_file = Path(sys.argv[1]), Path(sys.argv[2]), Path(sys.argv[3])
-    wanted = [line.strip().lstrip('/') for line in paths_file.read_text().splitlines() if line.strip()]
+    # source-lock.json names directories with a trailing slash and single files
+    # without one. Normalise both, or `want + '/'` becomes `ath//` and every
+    # directory entry silently misses.
+    wanted = [line.strip().strip('/') for line in paths_file.read_text().splitlines() if line.strip()]
     if not wanted:
         print('empty path list', file=sys.stderr)
         return 2
