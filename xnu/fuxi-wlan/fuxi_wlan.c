@@ -4959,7 +4959,19 @@ wl5_step(unsigned s)
 		if (wl_pre_bhi()) { return 0x6c; }
 		return wl_m6o_early() && wl_m6o_master() ? 0x6f : 0;
 	}
-	case 19: return wl_read_firmware();
+	case 19: {
+		/*
+		 * Board layer for the Ath12kWifi stack (fuxi_wlan_board.c, included at
+		 * the end of this file). It runs here, after step 17 trained the link
+		 * and after step 18 released the config window, because its
+		 * config-space accessor goes through fw_access(): any earlier and the
+		 * endpoint is not answering yet, so every capability read would be
+		 * counted as an unmapped-window fault. Reads fuxiwifilinux and returns
+		 * immediately when unset, so the r491 lane stays byte-identical.
+		 */
+		fuxi_wlan_board_init();
+		return wl_read_firmware();
+	}
 	case 20: {
 		if (!(wl_seq_flags & WL_O_MSI) && wl_disable_irqs()) { return 4; }
 		if (wl_mrd(wl_bhi + 0x28) != 0 || (wl_mrd(0x38) & 2) ||
@@ -5570,10 +5582,6 @@ fuxi_wlan_init(void)
 	}
 	unsigned limit = (arg == 1 || arg > (int)WL5_STEPS) ? WL5_STEPS : (unsigned)arg;
 	wl_iova_configure();
-	/* Board layer for the Ath12kWifi stack (fuxi_wlan_board.c, included at the
-	 * end of this file). Reads fuxiwifilinux and returns immediately when it is
-	 * unset, so the old lane is unaffected. */
-	fuxi_wlan_board_init();
 	printf("FUXI WLAN: enabled (fuxiwlan=%d), WCN7850 power-up + PCIe0 + MHI firmware, limit %u\n",
 	    arg, limit);
 	if (kernel_thread_start(fw_thread, (void *)(uintptr_t)limit, &thread) == KERN_SUCCESS) {

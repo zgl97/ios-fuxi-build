@@ -153,6 +153,10 @@ static void record(char k, uint64_t pa, uint32_t v) {
     assert(ne < 8192); events[ne++] = (struct ev){k,pa,v};
 }
 static bool wl_link_refused(uint64_t pa);
+/* Step 19 calls the board layer; the board source is not part of any slice,
+ * so every derived test gets this stub from the shared preamble. */
+static void fuxi_wlan_board_init(void) { }
+
 static uint32_t wl_prd(uint64_t pa) {
     if (wl_link_refused(pa)) {fw_faults++; return 0;}
     if(track_reads) { assert(nreads<4096); reads[nreads++]=pa; }
