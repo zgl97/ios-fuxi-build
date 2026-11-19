@@ -644,7 +644,14 @@ wl_board_caps(uint32_t *device_id, uint32_t *msi_cap, uint32_t *pcie_cap)
 
 	uint32_t status = 0, head = 0;
 	if (wl_board_cfg_read(0x04, 4, &status)) { return 1; }
-	if (!(status & (1u << 4))) { return 1; }	/* capability list absent */
+	/* Dword 0x04 is Command in the low half and Status in the high half. The
+	 * capability-list bit is Status bit 4, which is bit 20 of the dword; bit 4
+	 * of the dword is Command bit 4 and says nothing about the list. The
+	 * endpoint reports 0x100406 here, so testing bit 4 rejected every chain. */
+	if (!(status & (1u << 20))) {
+		printf("FUXI WLAN: L1 no capability list (cmd/status %#x); contain\n", status);
+		return 1;
+	}
 	if (wl_board_cfg_read(0x34, 4, &head)) { return 1; }
 	unsigned p = head & 0xffu;
 	*msi_cap = 0;

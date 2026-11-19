@@ -242,8 +242,10 @@ reset_fixtures(void)
     memset(fake_cfg, 0, sizeof(fake_cfg));
     /* vendor 0x17cb in the low half, device 0x1107 in the high half */
     fake_cfg[CFG_ID / 4] = (0x1107u << 16) | 0x17cbu;
-    /* status bit 4 = capability list present */
-    fake_cfg[CFG_CMD / 4] = 1u << 4;
+    /* dword 0x04 is Command in the low half, Status in the high half; the
+     * capability-list bit is Status bit 4 = dword bit 20. The endpoint reports
+     * 0x100406 here, so this fixture keeps the low half non-zero too. */
+    fake_cfg[CFG_CMD / 4] = 0x0406u | (1u << 20);
     /* list: PCIe (0x10) then MSI (0x05), terminator 0 */
     fake_cfg[CFG_CAP / 4] = PCIE_CAP | (MSI_CAP << 8);
     fake_cfg[PCIE_CAP / 4] = 0x10u | ((MSI_CAP & 0xff) << 8) | (2u << 16);
@@ -315,9 +317,14 @@ test_caps(void)
     assert(pcie == PCIE_CAP);
     assert(!fw_faults);
 
-    /* A missing capability list must be refused, not guessed. */
+    /* A missing capability list must be refused, not guessed. Command bit 4 is
+     * not the capability-list bit, so setting only that must still be refused:
+     * that mistake is what made the r493 boot log report "capability walk
+     * failed" against a real endpoint that reports 0x100406. */
     reset_fixtures();
     attach_host();
+    fake_cfg[CFG_CMD / 4] = 1u << 4;
+    assert(wl_board_caps(&device, &msi, &pcie) == 1);
     fake_cfg[CFG_CMD / 4] = 0;
     assert(wl_board_caps(&device, &msi, &pcie) == 1);
 
