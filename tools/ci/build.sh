@@ -507,13 +507,21 @@ kernel_ath12k() {
     # would hide which of the two the port will actually rely on.
     if [[ -n ${FUXI_ATH12K_KERNEL:-} ]]; then
         python3 tools/ci/kernel-exports.py "$FUXI_ATH12K_KERNEL" > "$work/kernel-exports.txt"
+        # comm compares byte-wise and demands that both inputs are sorted the
+        # same way. kernel-exports.py sorts in C order while sort(1) under the
+        # runner's locale puts `__stack_chk_fail` after `bzero`, so an unsorted
+        # pair makes comm emit the whole list as "missing" — the first attempt
+        # reported 14 of 14. Pin both sides to the same collation.
+        LC_ALL=C sort -o "$work/kernel-exports.txt" "$work/kernel-exports.txt"
         local exports_count
         exports_count=$(wc -l < "$work/kernel-exports.txt" | tr -d ' ')
         {
             printf 'kernel=%s exports=%s\n' "$FUXI_ATH12K_KERNEL" "$exports_count"
             for pair in "external:$objects/ath12k-external.txt" "needs-kernel:$objects/ath12k-needs-kernel.txt"; do
                 label=${pair%%:*}; list=${pair#*:}
-                comm -23 "$list" "$work/kernel-exports.txt" > "$out/ath12k-gap-$label.txt"
+                LC_ALL=C sort -o "$work/gap-input-$label.txt" "$list"
+                LC_ALL=C comm -23 "$work/gap-input-$label.txt" "$work/kernel-exports.txt" \
+                    > "$out/ath12k-gap-$label.txt"
                 printf '%s=%s missing=%s\n' "$label" "$(wc -l < "$list" | tr -d ' ')" \
                     "$(wc -l < "$out/ath12k-gap-$label.txt" | tr -d ' ')"
             done
@@ -522,8 +530,8 @@ kernel_ath12k() {
         # failure for a kext (the stack's own definition wins inside its own
         # image) but it is a real collision once these objects join the kernel,
         # so it is recorded rather than ignored.
-        cut -f1 "$objects/ath12k-globals.txt" | sort -u > "$work/globals.txt"
-        comm -12 "$work/globals.txt" "$work/kernel-exports.txt" > "$out/ath12k-collisions.txt"
+        cut -f1 "$objects/ath12k-globals.txt" | LC_ALL=C sort -u > "$work/globals.txt"
+        LC_ALL=C comm -12 "$work/globals.txt" "$work/kernel-exports.txt" > "$out/ath12k-collisions.txt"
         printf 'collisions=%s\n' "$(wc -l < "$out/ath12k-collisions.txt" | tr -d ' ')" \
             | tee -a "$out/ath12k-link-gap-summary.txt"
         # A name the objects need and the kernel does not export is the one
