@@ -222,6 +222,8 @@ static bool PE_parse_boot_argn(const char *name, void *out, int size) {
 
 static bool wl_variant_invalid = false;
 static bool wl_w12 = true;
+/* Set by the board layer when fuxiwifilinux=2; fuxi_wlan.c only reads it. */
+static bool wl_linux_stack = false;
 '''
 
 TESTS = r'''
@@ -268,6 +270,7 @@ reset_fixtures(void)
     boot_linux = NULL;
     wl_variant_invalid = false;
     wl_w12 = true;
+    wl_linux_stack = false;
     loglen = 0;
     logbuf[0] = 0;
 }
@@ -672,13 +675,18 @@ test_selector(void)
     assert(b->bar_len == (size_t)(WL_BAR0_END - WL_BAR0 + 1));
     assert(b->irq_base == 1000);
     assert(strstr(logbuf, "board layer ready"));
+    /* Variant 1 leaves the old W11-W15 lane in charge. */
+    assert(!wl_linux_stack);
 
-    /* Variant 2 has no stack linked: say so instead of half-starting. */
+    /* Variant 2 hands MHI/CE/HTC to the linked Linux stack and skips the old
+     * lane from step 28; the flag is what fuxi_wlan.c's case 28 reads. */
     reset_fixtures();
     attach_host();
     boot_linux = "2";
     fuxi_wlan_board_init();
-    assert(strstr(logbuf, "stack not linked"));
+    assert(wl_linux_stack);
+    assert(strstr(logbuf, "old W11-W15 lane skipped from step 28"));
+    assert(strstr(logbuf, "board layer ready"));
 
     /* A device that is not the WCN7850 is refused. */
     reset_fixtures();

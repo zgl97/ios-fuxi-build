@@ -806,12 +806,13 @@ fuxi_wlan_board_init(void)
 	/*
 	 * Variant 1 stops here: the board table and both accessors are proven by
 	 * the host tests and by a boot log, but no stack object is linked yet.
-	 * Variant 2 is reserved for the CI target that links the 125 ath12k
-	 * objects; it is rejected here until that target exists, so a typo cannot
-	 * silently start a half-linked stack.
+	 * Variant 2 hands the endpoint to the linked Linux stack: the old W11-W15
+	 * lane is skipped from step 28 on, because both drive the same MHI/CE/HTC
+	 * queues and one conversation per boot is all the firmware allows.
 	 */
 	if (wl_linux_variant == 2) {
-		printf("FUXI WLAN: L1 stack not linked in this build; use fuxiwifilinux=1\n");
+		wl_linux_stack = true;
+		printf("FUXI WLAN: L1 Linux stack owns MHI/CE/HTC; old W11-W15 lane skipped from step 28\n");
 	}
 	printf("FUXI WLAN: L1 board layer ready (fuxiwifilinux=%u)\n", wl_linux_variant);
 }

@@ -196,6 +196,16 @@ int main(void) {
     assert(wl_w11_run() && starts==2 && cap_requests==1); /* one shot */
     contain();assert(stops==2);
 
+    /* fuxiwifilinux=2: the Linux stack owns MHI/CE/HTC through nw_wifi_start(),
+     * so step 28 must not start the old conversation, and keep=1 must leave the
+     * endpoint standing -- that keep is what hands it over. */
+    start(0,true);wl_linux_stack=true;
+    assert(!finish_step() && wl_amss_reached && !starts && !cap_requests);
+    assert(strstr(logbuf,"W11-W15 skipped"));
+    before=ne;wl_finish(28);
+    assert(ne==before && !frees && !stops && wl_ipcr.va && wl_contexts.va);
+    wl_linux_stack=false;contain();
+
     start(9,false);assert(!finish_step());wl_finish(28);assert(frees==allocations && stops==2);dev_on=false;
     start(14,true);assert(!finish_step() && sleeps>=30);contain();
     for(unsigned kind=1;kind<=24;kind++) {

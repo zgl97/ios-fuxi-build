@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5606 @@
+@@ -0,0 +1,5622 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -764,6 +764,10 @@
 +static struct wl_dma wl_image, wl_vectors, wl_contexts, wl_tables;
 +static struct wl_dma wl_amss; /* full file when BHI uses a separate prefix */
 +static bool wl_qrtr, wl_w12, wl_w13, wl_w14, wl_w15, wl_w11_attempted, wl_w11_ok;
++/* fuxiwifilinux=2 (set by the board layer at step 19): the Linux stack owns
++ * MHI/CE/HTC/QRTR through nw_wifi_start(), so the old W11-W15 lane must not run
++ * -- both drive the same endpoints and the second one finds them consumed. */
++static bool wl_linux_stack;
 +static unsigned wl15_variant, wl16_variant, wl12_mlo_variant;
 +static unsigned wl_rails_variant;
 +/* fuxiwlanchunk=1 allocates at the firmware request sizes instead of
@@ -1145,6 +1149,7 @@
 +		} else { printf("FUXI WLAN: W14 selected BDF %s (override fuxiwlanbdf; default unverified)\n", wl14_bdf_name); }
 +	}
 +	wl_bhie_fired = wl_amss_reached = false;
++	wl_linux_stack = false; /* set again by the board layer at step 19 */
 +	wl_sbl_ready = wl_contexts_published = wl_sbl_m0 = false;
 +	wl_bhie_seq = 0;
 +	if ((wl_seq_flags & WL_O_PREFIX) && (wl_full || wl_vec == 1)) { wl_variant_invalid = true; }
@@ -5283,6 +5288,13 @@
 +		if (!wl_bhie_fired) { return 1; }
 +		int e = wl_poll(4);
 +		wl_amss_reached = !e;
++		/* fuxiwifilinux=2: the Linux stack took MHI/CE/HTC/QRTR through
++		 * nw_wifi_start() at the board layer. The old lane drives the same
++		 * endpoints, so it must not run -- one conversation per boot. */
++		if (!e && wl_linux_stack) {
++			printf("FUXI WLAN: W10 AMSS EE reached; Linux stack owns MHI/CE/HTC; W11-W15 skipped\n");
++			return 0;
++		}
 +		if (!e && wl_qrtr) { return wl_w11_run(); }
 +		if (!e) { printf("FUXI WLAN: W10 AMSS EE reached; M0 confirmed; no channels/QMI; %s\n",
 +		    wl_keep ? "keep-running requested, DMA buffers retained" : "stop/contain"); }
@@ -5355,9 +5367,13 @@
 +wl_finish(unsigned limit)
 +{
 +	/* Keep requires a complete, fault-free AMSS/M0 run. Earlier stops always
-+	 * contain, including fuxiwlan=22 with keep=1. Errors call abort directly. */
++	 * contain, including fuxiwlan=22 with keep=1. Errors call abort directly.
++	 * With fuxiwifilinux=2 the bring-up continues inside the Linux stack, so
++	 * the old lane's W11 success flag is not part of the condition: keeping is
++	 * what hands the endpoints over to it. */
 +	if ((limit >= 17 || (wl_seq_flags && limit >= 8)) &&
-+	    !(limit == WL5_STEPS && wl_keep && wl_amss_reached && (!wl_qrtr || wl_w11_ok) && !fw_faults)) { wl5_abort(limit); }
++	    !(limit == WL5_STEPS && wl_keep && wl_amss_reached &&
++	      (wl_linux_stack || !wl_qrtr || wl_w11_ok) && !fw_faults)) { wl5_abort(limit); }
 +}
 +
 +static void
@@ -6192,7 +6208,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,845 @@
+@@ -0,0 +1,846 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -7001,12 +7017,13 @@
 +	/*
 +	 * Variant 1 stops here: the board table and both accessors are proven by
 +	 * the host tests and by a boot log, but no stack object is linked yet.
-+	 * Variant 2 is reserved for the CI target that links the 125 ath12k
-+	 * objects; it is rejected here until that target exists, so a typo cannot
-+	 * silently start a half-linked stack.
++	 * Variant 2 hands the endpoint to the linked Linux stack: the old W11-W15
++	 * lane is skipped from step 28 on, because both drive the same MHI/CE/HTC
++	 * queues and one conversation per boot is all the firmware allows.
 +	 */
 +	if (wl_linux_variant == 2) {
-+		printf("FUXI WLAN: L1 stack not linked in this build; use fuxiwifilinux=1\n");
++		wl_linux_stack = true;
++		printf("FUXI WLAN: L1 Linux stack owns MHI/CE/HTC; old W11-W15 lane skipped from step 28\n");
 +	}
 +	printf("FUXI WLAN: L1 board layer ready (fuxiwifilinux=%u)\n", wl_linux_variant);
 +}

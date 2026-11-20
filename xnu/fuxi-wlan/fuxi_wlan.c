@@ -732,6 +732,10 @@ struct wl_dma { vm_offset_t va; vm_size_t size; uint64_t pa, iova; bool nc; };
 static struct wl_dma wl_image, wl_vectors, wl_contexts, wl_tables;
 static struct wl_dma wl_amss; /* full file when BHI uses a separate prefix */
 static bool wl_qrtr, wl_w12, wl_w13, wl_w14, wl_w15, wl_w11_attempted, wl_w11_ok;
+/* fuxiwifilinux=2 (set by the board layer at step 19): the Linux stack owns
+ * MHI/CE/HTC/QRTR through nw_wifi_start(), so the old W11-W15 lane must not run
+ * -- both drive the same endpoints and the second one finds them consumed. */
+static bool wl_linux_stack;
 static unsigned wl15_variant, wl16_variant, wl12_mlo_variant;
 static unsigned wl_rails_variant;
 /* fuxiwlanchunk=1 allocates at the firmware request sizes instead of
@@ -1113,6 +1117,7 @@ wl_probe_configure(void)
 		} else { printf("FUXI WLAN: W14 selected BDF %s (override fuxiwlanbdf; default unverified)\n", wl14_bdf_name); }
 	}
 	wl_bhie_fired = wl_amss_reached = false;
+	wl_linux_stack = false; /* set again by the board layer at step 19 */
 	wl_sbl_ready = wl_contexts_published = wl_sbl_m0 = false;
 	wl_bhie_seq = 0;
 	if ((wl_seq_flags & WL_O_PREFIX) && (wl_full || wl_vec == 1)) { wl_variant_invalid = true; }
@@ -5251,6 +5256,13 @@ wl5_step(unsigned s)
 		if (!wl_bhie_fired) { return 1; }
 		int e = wl_poll(4);
 		wl_amss_reached = !e;
+		/* fuxiwifilinux=2: the Linux stack took MHI/CE/HTC/QRTR through
+		 * nw_wifi_start() at the board layer. The old lane drives the same
+		 * endpoints, so it must not run -- one conversation per boot. */
+		if (!e && wl_linux_stack) {
+			printf("FUXI WLAN: W10 AMSS EE reached; Linux stack owns MHI/CE/HTC; W11-W15 skipped\n");
+			return 0;
+		}
 		if (!e && wl_qrtr) { return wl_w11_run(); }
 		if (!e) { printf("FUXI WLAN: W10 AMSS EE reached; M0 confirmed; no channels/QMI; %s\n",
 		    wl_keep ? "keep-running requested, DMA buffers retained" : "stop/contain"); }
@@ -5323,9 +5335,13 @@ static void
 wl_finish(unsigned limit)
 {
 	/* Keep requires a complete, fault-free AMSS/M0 run. Earlier stops always
-	 * contain, including fuxiwlan=22 with keep=1. Errors call abort directly. */
+	 * contain, including fuxiwlan=22 with keep=1. Errors call abort directly.
+	 * With fuxiwifilinux=2 the bring-up continues inside the Linux stack, so
+	 * the old lane's W11 success flag is not part of the condition: keeping is
+	 * what hands the endpoints over to it. */
 	if ((limit >= 17 || (wl_seq_flags && limit >= 8)) &&
-	    !(limit == WL5_STEPS && wl_keep && wl_amss_reached && (!wl_qrtr || wl_w11_ok) && !fw_faults)) { wl5_abort(limit); }
+	    !(limit == WL5_STEPS && wl_keep && wl_amss_reached &&
+	      (wl_linux_stack || !wl_qrtr || wl_w11_ok) && !fw_faults)) { wl5_abort(limit); }
 }
 
 static void
