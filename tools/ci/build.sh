@@ -296,6 +296,14 @@ kernel() {
         shasum -a 256 xnu/fuxi-wlan/fuxi_wlan.c xnu/patches/0099-fuxi-wlan.patch \
             xnu/fuxi-wlan/fuxi_wlan_board.c xnu/fuxi-wlan/nw_abi.h \
             shim/fuxi-probe/wlan.c > "$out/wlan-source-SHA256SUMS.txt"
+        # The kernel now builds the Ath12kWifi stack in-tree (patch 0117), and dxb
+        # runs 9999-stage-ath12k.sh before it applies any patch, so the pinned
+        # sources have to be staged first. Same script the compile-only lane uses.
+        bash tools/fuxi-ath12k-stage.sh "$work/ath12k" "$downloads"
+        export FUXI_ATH12K_TREE=$work/ath12k
+        shasum -a 256 xnu/patches/0117-fuxi-ath12k.patch \
+            xnu/patches/9999-stage-ath12k.sh xnu/fuxi-ath12k/manifest.txt \
+            >> "$out/wlan-source-SHA256SUMS.txt"
     fi
     source_checkout dxb https://github.com/blacktop/darwin-xnu-build.git "$DXB_SHA" "$dxb"
     python3 tools/ci/prepare-kernel.py "$dxb"
