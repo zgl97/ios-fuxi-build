@@ -28,6 +28,11 @@ done
 # anything that defines them. The staged copy must therefore begin with lx.h.
 [[ $(head -1 bsd/fuxi_ath12k/src/fxa_nw_crypto_mac80211.c) == '#include "lx.h"' ]] \
     || { echo "staged crypto unit does not include lx.h first"; exit 1; }
+# The same header is reached from XNU's forced include, before any of our own
+# forced includes run, so it has to state its own dependency too. Without this
+# the CI build fails with 139 'unknown type name' errors inside crypto.h.
+[[ $(head -1 bsd/fuxi_ath12k/out/crypto/crypto.h) == '#include "lx.h"' ]] \
+    || { echo "staged crypto.h does not include lx.h first"; exit 1; }
 
 # The Makefile passes -include lx_pci.h, so that name must resolve on the
 # include path the patch declares.

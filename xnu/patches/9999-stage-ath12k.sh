@@ -203,7 +203,16 @@ for sub in ('include', 'shim/include', 'shim/libc', 'shim/crypto', 'out', 'src',
             continue
         target = dest / header.relative_to(tree)
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(header.resolve().read_bytes())
+        data = header.resolve().read_bytes()
+        if header.relative_to(tree).as_posix() == 'out/crypto/crypto.h':
+            # wpa_supplicant's crypto.h declares its prototypes with u8 and
+            # size_t but includes nothing that defines them: it expects the
+            # caller to have pulled in includes.h first. Inside the kernel that
+            # assumption breaks, because XNU's forced include runs before ours
+            # and reaches this header through <crypto/crypto.h>. Make the
+            # header state its own dependency.
+            data = b'#include "lx.h"' + bytes([10]) + data
+        target.write_bytes(data)
 
 print(f'staged {len(ENTRIES)} C files into {dest}')
 PY
