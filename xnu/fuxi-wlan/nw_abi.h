@@ -78,6 +78,18 @@ int nw_wifi_tx_packet(void *context, size_t length, nw_packet_reader reader, voi
 void nw_wifi_status_get(struct nw_wifi_status *st);
 void nw_wifi_tx_reasons(char *text, int size);                          /* the driver's transmit completion counts, as text */
 void nw_wifi_link_state(char *text, int size); /* worker only; reads cached peer rates, no firmware request */
+/* The control channel's transport: where encoded replies leave the module for
+ * userspace. A board with no socket of its own installs one before
+ * nw_wifi_start(), so cfg80211's nl80211_init() can bind; its send reports
+ * NW_CONTROL_SEND_CLOSED, which drops the reply and detaches the client
+ * instead of retrying forever. */
+enum nw_control_send_result { NW_CONTROL_SEND_OK, NW_CONTROL_SEND_AGAIN, NW_CONTROL_SEND_CLOSED };
+struct nw_control_transport {
+  void *context;
+  int (*send)(void *context, uint64_t session, const void *bytes, size_t length);
+  void (*wake)(void *context);
+};
+int nw_wifi_control_transport_set(const struct nw_control_transport *transport);
 int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b);
 void nw_wifi_set_platform(const struct lx_platform *p); /* before exposing native socket callbacks */
 int nw_wifi_step(void);                                                   /* nonzero while frames move: call again without sleeping */

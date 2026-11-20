@@ -85,6 +85,35 @@ static unsigned wl_linux_variant;
  * on, so the pump and the abort path know whether there is anything to stop. */
 static bool wl_linux_started;
 
+/*
+ * The control channel wants somewhere to send its replies. Under XNU there is
+ * no native socket client yet, and cfg80211's nl80211_init() refuses to bind
+ * without a transport (nw_control.c: nw_wifi_control_bind returns
+ * NW_CONTROL_NOT_READY, which nl80211_init turns into -EBUSY). Install a
+ * transport that reports every send as closed: the channel then drops the
+ * reply and detaches the client rather than retrying forever, and the stack
+ * starts. The transport survives nw_wifi_control_shutdown(), so one install
+ * covers every start.
+ */
+static int
+wl_board_control_send(void *context, uint64_t session, const void *bytes, size_t length)
+{
+	(void)context; (void)session; (void)bytes; (void)length;
+	return NW_CONTROL_SEND_CLOSED;
+}
+
+static void
+wl_board_control_wake(void *context)
+{
+	(void)context;
+}
+
+static const struct nw_control_transport wl_board_control = {
+	.context = NULL,
+	.send = wl_board_control_send,
+	.wake = wl_board_control_wake,
+};
+
 /* ---- host-test injection ----------------------------------------------- */
 
 /*
@@ -859,6 +888,12 @@ fuxi_wlan_board_start(void)
 	if (!wl_board.cfg_read && wl_board_prepare()) { return 1; }
 	if (!wl_linux_stack) { return 0; }
 	if (wl_linux_started) { return 0; }
+	/* cfg80211's nl80211_init() binds a control channel and turns a missing
+	 * transport into -EBUSY. Install the closed one first; a refusal here is
+	 * not fatal on its own, the start reports the real error below. */
+	if (nw_wifi_control_transport_set(&wl_board_control) != 0) { /* 0 is NW_CONTROL_OK */
+		printf("FUXI WLAN: L1 control transport not installed; bind will report it\n");
+	}
 	int error = nw_wifi_start(&wl_board_platform, &wl_board);
 	if (error) {
 		printf("FUXI WLAN: L1 stack start failed: %d\n", error);

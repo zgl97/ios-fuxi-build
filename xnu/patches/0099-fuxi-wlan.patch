@@ -6295,7 +6295,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,897 @@
+@@ -0,0 +1,932 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6382,6 +6382,35 @@
 +/* Set once nw_wifi_start() returned 0: the stack owns the endpoint from then
 + * on, so the pump and the abort path know whether there is anything to stop. */
 +static bool wl_linux_started;
++
++/*
++ * The control channel wants somewhere to send its replies. Under XNU there is
++ * no native socket client yet, and cfg80211's nl80211_init() refuses to bind
++ * without a transport (nw_control.c: nw_wifi_control_bind returns
++ * NW_CONTROL_NOT_READY, which nl80211_init turns into -EBUSY). Install a
++ * transport that reports every send as closed: the channel then drops the
++ * reply and detaches the client rather than retrying forever, and the stack
++ * starts. The transport survives nw_wifi_control_shutdown(), so one install
++ * covers every start.
++ */
++static int
++wl_board_control_send(void *context, uint64_t session, const void *bytes, size_t length)
++{
++	(void)context; (void)session; (void)bytes; (void)length;
++	return NW_CONTROL_SEND_CLOSED;
++}
++
++static void
++wl_board_control_wake(void *context)
++{
++	(void)context;
++}
++
++static const struct nw_control_transport wl_board_control = {
++	.context = NULL,
++	.send = wl_board_control_send,
++	.wake = wl_board_control_wake,
++};
 +
 +/* ---- host-test injection ----------------------------------------------- */
 +
@@ -7157,6 +7186,12 @@
 +	if (!wl_board.cfg_read && wl_board_prepare()) { return 1; }
 +	if (!wl_linux_stack) { return 0; }
 +	if (wl_linux_started) { return 0; }
++	/* cfg80211's nl80211_init() binds a control channel and turns a missing
++	 * transport into -EBUSY. Install the closed one first; a refusal here is
++	 * not fatal on its own, the start reports the real error below. */
++	if (nw_wifi_control_transport_set(&wl_board_control) != 0) { /* 0 is NW_CONTROL_OK */
++		printf("FUXI WLAN: L1 control transport not installed; bind will report it\n");
++	}
 +	int error = nw_wifi_start(&wl_board_platform, &wl_board);
 +	if (error) {
 +		printf("FUXI WLAN: L1 stack start failed: %d\n", error);
@@ -7195,7 +7230,7 @@
 +}
 --- a/bsd/dev/nw_abi.h
 +++ b/bsd/dev/nw_abi.h
-@@ -0,0 +1,97 @@
+@@ -0,0 +1,109 @@
 +/* The boundary between the board code and the WiFi module: what the board provides, and the calls into the module. Plain C types only. */
 +#ifndef NW_ABI_H
 +#define NW_ABI_H
@@ -7276,6 +7311,18 @@
 +void nw_wifi_status_get(struct nw_wifi_status *st);
 +void nw_wifi_tx_reasons(char *text, int size);                          /* the driver's transmit completion counts, as text */
 +void nw_wifi_link_state(char *text, int size); /* worker only; reads cached peer rates, no firmware request */
++/* The control channel's transport: where encoded replies leave the module for
++ * userspace. A board with no socket of its own installs one before
++ * nw_wifi_start(), so cfg80211's nl80211_init() can bind; its send reports
++ * NW_CONTROL_SEND_CLOSED, which drops the reply and detaches the client
++ * instead of retrying forever. */
++enum nw_control_send_result { NW_CONTROL_SEND_OK, NW_CONTROL_SEND_AGAIN, NW_CONTROL_SEND_CLOSED };
++struct nw_control_transport {
++  void *context;
++  int (*send)(void *context, uint64_t session, const void *bytes, size_t length);
++  void (*wake)(void *context);
++};
++int nw_wifi_control_transport_set(const struct nw_control_transport *transport);
 +int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b);
 +void nw_wifi_set_platform(const struct lx_platform *p); /* before exposing native socket callbacks */
 +int nw_wifi_step(void);                                                   /* nonzero while frames move: call again without sleeping */

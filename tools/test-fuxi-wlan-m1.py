@@ -256,6 +256,17 @@ int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b) {
 }
 int nw_wifi_step(void) { nw_steps++; return 0; }
 void nw_wifi_stop(void) { nw_stops++; }
+
+/* nw_abi.h declares this with external linkage too. The board installs a
+ * transport whose send reports the channel closed; record the install so the
+ * selector test can prove it happens before the stack starts. */
+static unsigned transport_sets;
+static const struct nw_control_transport *transport_installed;
+static int transport_set_rc;
+
+int nw_wifi_control_transport_set(const struct nw_control_transport *t) {
+    transport_sets++; transport_installed = t; return transport_set_rc;
+}
 '''
 
 TESTS = r'''
@@ -309,6 +320,9 @@ reset_fixtures(void)
     nw_start_rc = 0;
     nw_start_plat = NULL;
     nw_start_board = NULL;
+    transport_sets = 0;
+    transport_installed = NULL;
+    transport_set_rc = 0;
     loglen = 0;
     logbuf[0] = 0;
 }
@@ -733,8 +747,9 @@ test_selector(void)
     assert(strstr(logbuf, "board layer ready"));
     /* Variant 1 leaves the old W11-W15 lane in charge. */
     assert(!wl_linux_stack);
-    /* ... and start() never touches the stack. */
+    /* ... and start() never touches the stack, nor the control channel. */
     assert(!fuxi_wlan_board_start() && !nw_starts && !nw_steps && !nw_stops);
+    assert(transport_sets == 0);
     assert(!fuxi_wlan_board_step() && !nw_steps);
     fuxi_wlan_board_stop();
     assert(!nw_stops);
@@ -751,8 +766,16 @@ test_selector(void)
 
     /* start() hands the endpoint to the stack exactly once, with the same two
      * tables the board layer exports, and a second call is a no-op. */
+    /* The control transport goes in first: without one nl80211_init() turns a
+     * missing transport into -EBUSY and the whole start fails. It must be the
+     * closed transport this layer owns, installed before nw_wifi_start(). */
+    assert(transport_sets == 0);
     assert(!fuxi_wlan_board_start());
     assert(nw_starts == 1);
+    assert(transport_sets == 1);
+    assert(transport_installed != NULL && transport_installed->send && transport_installed->wake);
+    assert(transport_installed->send(NULL, 0, NULL, 0) == NW_CONTROL_SEND_CLOSED);
+    transport_installed->wake(NULL);
     assert(nw_start_plat == fuxi_wlan_board_platform());
     assert(nw_start_board == fuxi_wlan_board_table());
     assert(strstr(logbuf, "stack started"));
@@ -773,6 +796,7 @@ test_selector(void)
     nw_start_rc = -5;
     assert(fuxi_wlan_board_start() == -5);
     assert(nw_starts == 1);
+    assert(transport_sets == 1);
     assert(strstr(logbuf, "stack start failed: -5"));
     assert(!fuxi_wlan_board_step() && !nw_steps);
     fuxi_wlan_board_stop();
