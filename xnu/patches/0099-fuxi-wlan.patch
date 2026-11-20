@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5712 @@
+@@ -0,0 +1,5734 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -2517,6 +2517,28 @@
 +	wl_dma_clean(&wl_tables);
 +	if (wl_smmu_sync(false)) { return; }
 +	printf("FUXI WLAN: L1 DMA window unpublished IOVA %#llx-%#llx\n", iova, iova + d->size - 1);
++}
++
++/*
++ * The arena's first fit only knows its own slots, but the pool already holds
++ * this driver's fixed buffers and their leaves are live in the same tables.
++ * Report the first walked page in [iova, iova + bytes) so the allocator steps
++ * over it: a 6 MiB BHI image aligns straight into the AMSS window, publish
++ * then refuses it, and power up dies as -ENOMEM before MHI ever moves.
++ * Anything not proven vacant counts as occupied, so a wrong answer costs a
++ * skipped interval, never an alias onto another buffer's pages.
++ */
++static uint64_t
++wl_board_dma_occupied(uint64_t iova, vm_size_t bytes)
++{
++	if (!bytes || !wl_tables.va || !wl_enabled) { return iova; }
++	if (iova < wl_iova_base || iova >= wl_iova_end || bytes > wl_iova_end - iova) { return iova; }
++	for (vm_size_t off = 0; off < bytes; off += PAGE_SIZE) {
++		const uint64_t addr = iova + off;
++		const uint64_t *l3 = (const uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
++		if (l3[(addr >> 12) & 511]) { return addr; }
++	}
++	return 0;
 +}
 +
 +/* Fault-contained cleanup is restricted to this driver's proven vacant slots.
@@ -6298,7 +6320,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,972 @@
+@@ -0,0 +1,980 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6681,7 +6703,15 @@
 +			const uint64_t s = wl_board_dma[i].iova, e = s + wl_board_dma[i].size;
 +			if (at < e && s < at + bytes) { at = e; clash = true; break; }
 +		}
-+		if (!clash) { break; }
++		if (clash) { continue; }
++		/* The slot table only knows the arena's own blocks, but the pool also
++		 * holds this driver's fixed buffers, already walked. Step over them:
++		 * the arena starts at the bottom of the pool while the fixed buffers
++		 * sit in the middle of it, so the first fit lands inside the AMSS
++		 * window and publish refuses every large request. */
++		const uint64_t busy = wl_board_dma_occupied(at, bytes);
++		if (!busy) { break; }
++		at = busy + PAGE_SIZE;
 +	}
 +
 +	struct wl_dma d;

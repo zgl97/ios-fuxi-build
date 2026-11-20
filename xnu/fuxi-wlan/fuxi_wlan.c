@@ -2487,6 +2487,28 @@ wl_board_dma_unpublish(struct wl_dma *d, uint64_t iova)
 	printf("FUXI WLAN: L1 DMA window unpublished IOVA %#llx-%#llx\n", iova, iova + d->size - 1);
 }
 
+/*
+ * The arena's first fit only knows its own slots, but the pool already holds
+ * this driver's fixed buffers and their leaves are live in the same tables.
+ * Report the first walked page in [iova, iova + bytes) so the allocator steps
+ * over it: a 6 MiB BHI image aligns straight into the AMSS window, publish
+ * then refuses it, and power up dies as -ENOMEM before MHI ever moves.
+ * Anything not proven vacant counts as occupied, so a wrong answer costs a
+ * skipped interval, never an alias onto another buffer's pages.
+ */
+static uint64_t
+wl_board_dma_occupied(uint64_t iova, vm_size_t bytes)
+{
+	if (!bytes || !wl_tables.va || !wl_enabled) { return iova; }
+	if (iova < wl_iova_base || iova >= wl_iova_end || bytes > wl_iova_end - iova) { return iova; }
+	for (vm_size_t off = 0; off < bytes; off += PAGE_SIZE) {
+		const uint64_t addr = iova + off;
+		const uint64_t *l3 = (const uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
+		if (l3[(addr >> 12) & 511]) { return addr; }
+	}
+	return 0;
+}
+
 /* Fault-contained cleanup is restricted to this driver's proven vacant slots.
  * BME off + PERST/drain are prerequisites in wl5_abort. Failure quarantines
  * tables and data; never free a table while a walker could still use it. */

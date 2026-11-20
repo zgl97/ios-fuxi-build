@@ -1020,6 +1020,36 @@ int main(void) {
     wl_dma_free(&arena); assert(frees==1);
     wl5_abort(20); assert(frees==5);
 
+    /* The arena's first fit only knows its own slots, but the pool also holds
+       this driver's fixed buffers and their leaves are live: the allocator has
+       to see that occupancy and step over it. Without this a 6 MiB BHI image
+       aligns into the AMSS window, publish refuses it, and power up dies as
+       -ENOMEM before MHI ever moves. */
+    init();
+    for(unsigned s=17;s<=20;s++) assert(wl5_step(s)==0);
+    /* A fixed buffer is walked, so the arena has to see it. */
+    assert(wl_board_dma_occupied(wl_image.iova,PAGE_SIZE)==wl_image.iova);
+    assert(wl_board_dma_occupied(wl_image.iova+wl_image.size-PAGE_SIZE,PAGE_SIZE)==wl_image.iova+wl_image.size-PAGE_SIZE);
+    struct wl_dma first={0}, second={0};
+    assert(wl_dma_alloc(&first,PAGE_SIZE)==0 && wl_dma_alloc(&second,PAGE_SIZE)==0);
+    assert(first.iova+first.size==second.iova);
+    assert(!wl_board_dma_occupied(first.iova,first.size));
+    assert(wl_board_dma_publish(&second,second.iova)==0);
+    /* A window that starts free and ends on a leaf reports the leaf, not the
+       window start: the allocator then steps to that page, not past the end. */
+    assert(wl_board_dma_occupied(first.iova,first.size+second.size)==second.iova);
+    assert(wl_board_dma_occupied(second.iova,second.size)==second.iova);
+    wl_board_dma_unpublish(&second,second.iova);
+    assert(!wl_board_dma_occupied(first.iova,first.size+second.size));
+    wl_dma_free(&first); wl_dma_free(&second);
+    /* A dead walk, an empty request and an out-of-pool window all count as
+       occupied: a wrong answer may cost a skipped interval, never an alias. */
+    assert(wl_board_dma_occupied(wl_iova_base,0)==wl_iova_base);
+    assert(wl_board_dma_occupied(wl_iova_end,PAGE_SIZE)==wl_iova_end);
+    assert(wl_board_dma_occupied(wl_iova_base-4096,PAGE_SIZE)==wl_iova_base-4096);
+    assert(wl_board_dma_occupied(wl_iova_end-PAGE_SIZE,PAGE_SIZE*2)==wl_iova_end-PAGE_SIZE);
+    wl5_abort(20);
+
     /* Every hardware poll terminates, error EEs are never success. */
     init(); assert(wl5_step(17)==0);
     assert(wl_poll(0)==2 && sleeps==5000);

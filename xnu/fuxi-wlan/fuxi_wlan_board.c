@@ -380,7 +380,15 @@ wl_board_dma_alloc(size_t n, uint64_t *bus)
 			const uint64_t s = wl_board_dma[i].iova, e = s + wl_board_dma[i].size;
 			if (at < e && s < at + bytes) { at = e; clash = true; break; }
 		}
-		if (!clash) { break; }
+		if (clash) { continue; }
+		/* The slot table only knows the arena's own blocks, but the pool also
+		 * holds this driver's fixed buffers, already walked. Step over them:
+		 * the arena starts at the bottom of the pool while the fixed buffers
+		 * sit in the middle of it, so the first fit lands inside the AMSS
+		 * window and publish refuses every large request. */
+		const uint64_t busy = wl_board_dma_occupied(at, bytes);
+		if (!busy) { break; }
+		at = busy + PAGE_SIZE;
 	}
 
 	struct wl_dma d;

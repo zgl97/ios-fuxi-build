@@ -199,6 +199,20 @@ static void wl_board_dma_unpublish(struct wl_dma *d, uint64_t iova) {
     unpublish_calls++;
 }
 
+/* The pool also holds the driver's fixed buffers, whose leaves are already
+ * walked. fuxi_wlan.c owns that walk; the arena only needs to know which
+ * interval to step over, so the fixture reports one busy interval. */
+static unsigned occupied_calls;
+static uint64_t occupied_lo, occupied_hi;
+
+static uint64_t wl_board_dma_occupied(uint64_t iova, vm_size_t bytes) {
+    occupied_calls++;
+    if (!bytes || !occupied_lo) { return 0; }
+    const uint64_t end = iova + bytes;
+    if (iova < occupied_hi && occupied_lo < end) { return occupied_lo > iova ? occupied_lo : iova; }
+    return 0;
+}
+
 static struct wl_dma wl_msi_sink;
 
 static void wl_sleep(unsigned ms) { (void)ms; }
@@ -318,6 +332,8 @@ reset_fixtures(void)
     fail_alloc_at = 0;
     publish_calls = unpublish_calls = 0;
     fail_publish_at = 0;
+    occupied_calls = 0;
+    occupied_lo = occupied_hi = 0;
     wl_iova_base = 0xa0000000ull;
     wl_iova_end = 0xb0000000ull;
     wl_iova_next = 0xa0000000ull;
@@ -539,6 +555,23 @@ test_dma(void)
     const unsigned unpubs = unpublish_calls;
     wl_board_dma_free(64, p7, b7);
     assert(unpublish_calls == unpubs + 1);
+
+    /* The arena must consult the live walk, not only its own slot table: the
+     * pool also holds this driver's fixed buffers, already walked. */
+    uint64_t b8 = 0;
+    void *p8 = wl_board_dma_alloc(64, &b8);
+    assert(p8 && b8 >= reserved_end);
+    assert(occupied_calls > 0);
+    wl_board_dma_free(64, p8, b8);
+    occupied_lo = b8;
+    occupied_hi = b8 + PAGE_SIZE;
+    const unsigned occ_before = occupied_calls;
+    uint64_t b9 = 0;
+    void *p9 = wl_board_dma_alloc(64, &b9);
+    assert(p9 && b9 != b8 && b9 >= occupied_hi);
+    assert(occupied_calls > occ_before);
+    wl_board_dma_free(64, p9, b9);
+    occupied_lo = occupied_hi = 0;
 
     /* Exhausting the slot table fails cleanly instead of aliasing. */
     unsigned got = 0;
