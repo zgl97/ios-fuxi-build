@@ -112,6 +112,18 @@ static void wl_pwr(uint64_t pa, uint32_t v) {
     fw_faults++;
 }
 
+/* fuxi_wlan.c owns the kernel mappings and answers VA lookups over them; the
+ * board layer asks it for BAR0 because the stack dereferences what it is
+ * handed. Only the endpoint window exists in this slice. */
+static uintptr_t fake_bar0_va = 0xfffffff000800000ull;
+static unsigned fw_va_calls;
+static bool fake_bar0_mapped = true;
+static uintptr_t fw_va(uint64_t pa) {
+    fw_va_calls++;
+    if (!fake_bar0_mapped) { return 0; }
+    return pa == WL_BAR0 ? fake_bar0_va : 0;
+}
+
 /* ---- kernel memory ----------------------------------------------------- */
 
 struct wl_dma {
@@ -322,6 +334,8 @@ reset_fixtures(void)
     nw_start_board = NULL;
     transport_sets = 0;
     transport_installed = NULL;
+    fw_va_calls = 0;
+    fake_bar0_mapped = true;
     transport_set_rc = 0;
     loglen = 0;
     logbuf[0] = 0;
@@ -743,6 +757,26 @@ test_selector(void)
     assert(b->device_id == 0x1107);
     assert(b->msi_cap == MSI_CAP);
     assert(b->bar_len == (size_t)(WL_BAR0_END - WL_BAR0 + 1));
+    /* bar is what pci_iomap() hands the stack as ab->mem and every register
+     * access dereferences it, so it must be the mapped VA, not 0x60400000:
+     * handing over the physical address made r497 write to it as a pointer and
+     * the kernel rebooted with no panic text. */
+    assert(b->bar == (void *)fake_bar);
+    assert((uintptr_t)b->bar != (uintptr_t)WL_BAR0);
+    assert(b->map_phys != NULL);
+    assert(b->map_phys(WL_BAR0, 0x200000) == (void *)fake_bar);
+    /* Anything the old lane did not map comes back NULL, so the stack reports
+     * a failed map instead of dereferencing a physical address. */
+    assert(b->map_phys(0x12345000ull, 0x1000) == NULL);
+    /* On XNU there is no host table to lean on: the same accessor has to fall
+     * through to the driver's own window table, and refuse when it is absent. */
+    fuxi_wlan_board_host(NULL);
+    assert(wl_board_map_phys(WL_BAR0, 0x200000) == (void *)fake_bar0_va);
+    assert(wl_board_map_phys(0x12345000ull, 0x1000) == NULL);
+    fake_bar0_mapped = false;
+    assert(wl_board_map_phys(WL_BAR0, 0x200000) == NULL);
+    fake_bar0_mapped = true;
+    attach_host();
     assert(b->irq_base == 1000);
     assert(strstr(logbuf, "board layer ready"));
     /* Variant 1 leaves the old W11-W15 lane in charge. */

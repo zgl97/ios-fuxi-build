@@ -786,6 +786,33 @@ wl_board_maxread(void)
 }
 
 /*
+ * Map a physical address into the VA space the stack will dereference.
+ *
+ * The stack's readl/writel are plain pointer dereferences (shim/include/lx.h:420),
+ * so whatever comes back from here is used directly at EL1. Returning the
+ * physical address -- which is what a NULL map_phys did -- makes the first
+ * window select in ath12k_pci_read32 write to 0x6040310c as if it were a VA and
+ * the kernel reboots with no panic text (r497). fw_va() answers for the windows
+ * fw_thread already mapped, and the whole 2 MiB BAR0 is one of them, so the
+ * endpoint window needs no second mapping here. Anything outside those windows
+ * gets NULL, which the stack reports as a failed map instead of faulting.
+ */
+static void *
+wl_board_map_phys(uint64_t pa, size_t n)
+{
+	(void)n;
+	if (wl_board_host) {
+		/* The host harness has no kernel map; it owns a plain array. */
+		if (pa >= WL_BAR0 && pa < (uint64_t)WL_BAR0 + wl_board_host->bar_len) {
+			return (void *)((uintptr_t)wl_board_host->bar + (uintptr_t)(pa - WL_BAR0));
+		}
+		return NULL;
+	}
+	uintptr_t va = fw_va(pa);
+	return va ? (void *)va : NULL;
+}
+
+/*
  * Prepare the board table. The register window is the endpoint's BAR0, which
  * the old lane already assigned and verified (fuxi_wlan.c step 15, WL_BAR0
  * 0x60400000, 2 MiB non-prefetchable); this lane never re-programs it, so the
@@ -804,7 +831,17 @@ wl_board_prepare(void)
 		return 1;
 	}
 	bzero(&wl_board, sizeof(wl_board));
-	wl_board.bar = (void *)(uintptr_t)WL_BAR0;
+	/*
+	 * bar is what pci_iomap() hands ath12k as ab->mem, and every register
+	 * access is a dereference of it: it has to be the kernel VA the old lane
+	 * mapped, never the physical address. wl_board_map_phys answers both the
+	 * XNU case (fw_va over the 2 MiB BAR0 window) and the host harness.
+	 */
+	wl_board.bar = wl_board_map_phys(WL_BAR0, WL_BAR0_END - WL_BAR0 + 1);
+	if (!wl_board.bar) {
+		printf("FUXI WLAN: L1 BAR0 window not mapped; contain\n");
+		return 1;
+	}
 	wl_board.bar_len = (size_t)(WL_BAR0_END - WL_BAR0 + 1);
 	wl_board.device_id = (uint16_t)device;
 	wl_board.msi_cap = (uint16_t)msi;
@@ -815,10 +852,13 @@ wl_board_prepare(void)
 	wl_board.cfg_read = wl_board_cfg_read;
 	wl_board.cfg_write = wl_board_cfg_write;
 	wl_board.msi_target = wl_board_msi_target;
-	wl_board.map_phys = NULL;
-	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx+%lu irq base %d\n",
-	    device, msi, pcie, (uint64_t)WL_BAR0, (unsigned long)wl_board.bar_len,
-	    wl_board.irq_base);
+	/* lx_ioremap()/memremap() go through this as well: qmi.c maps the target
+	 * memory regions it is told to hand the firmware, and those are DDR the
+	 * old lane owns, not BAR0. */
+	wl_board.map_phys = wl_board_map_phys;
+	printf("FUXI WLAN: L1 board device %#x msi cap %#x pcie cap %#x bar %#llx va %#llx+%lu irq base %d\n",
+	    device, msi, pcie, (uint64_t)WL_BAR0, (uint64_t)(uintptr_t)wl_board.bar,
+	    (unsigned long)wl_board.bar_len, wl_board.irq_base);
 	if (wl_board_subsystem() || wl_board_maxread()) { return 1; }
 	return 0;
 }

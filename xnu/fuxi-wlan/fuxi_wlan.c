@@ -109,12 +109,15 @@ static struct fw_window fw_windows[] = {
 	{0x01c00000, 0x8000, 0},    /* PCIe0 PARF 0x1c00000 + QMP PHY 0x1c06000 */
 	{0x01fd4000, 0x4000, 0},    /* TCSR clkref 0x1fd5100 */
 	{0x15000000, 0x100000, 0},  /* apps SMMU: GR0/GR1 + runtime-bounded CBs */
-	{0x60480000, 0x80000, 0},   /* EP sliding 512-KiB window: version + bounded BL logs */
+	/* The endpoint's whole 2 MiB BAR0: MHI/BHI at +0, the sliding 512-KiB
+	 * window at +0x80000. One mapping, because the Linux stack addresses the
+	 * window as bar+0x80000 and needs that arithmetic to land in the same VA
+	 * range as bar. */
+	{0x60400000, 0x200000, 0},
 	{0x0f14c000, 0x18000, 0},   /* TLMM tiles gpio76..96 */
 	{0x17a20000, 0x4000, 0},    /* apps RSC DRV2 + TCS */
 	{0x60000000, 0x4000, 0},    /* PCIe0 DBI, ELBI 0xf20, iATU 0x1000 */
 	{0x60100000, 0x4000, 0},    /* config window (iATU region 0, CFG0) */
-	{0x60400000, 0x4000, 0},    /* endpoint BAR0, first 16 KiB (MHI/BHI) */
 	{0x81c60000, 0x20000, 0},   /* cmd-db (reserved DDR) */
 	{0x0c300000, 0x4000, 0},    /* opt-in M6n AOSS QMP; descriptor bounds 0x400 */
 	{0x00408000, 0x4000, 0},    /* opt-in M6n IPCC MPROC SEND_ID */
