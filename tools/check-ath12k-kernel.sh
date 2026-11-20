@@ -140,6 +140,13 @@ for obj in objects:
     if plain in line.group(1):
         raise SystemExit(f"{obj} still gets the unescaped RC_DEFAULT flag")
 
+# ctfconvert cannot size the anonymous unions the Linux headers produce and
+# aborts the kernel link after every object has compiled. The stack's objects
+# carry no CTF anyone needs, so they must be built without debug info.
+if 'FUXI_ATH12K_BASE = ' not in patch or '-g0' not in re.search(
+        r'^\+FUXI_ATH12K_BASE = .*$', patch, re.M).group(0):
+    raise SystemExit("the stack is built with debug info; ctfconvert will fail")
+
 print(f"manifest rows=125 objects={len(set(objects))} heredocs={len(bodies)} "
       f"patch targets={len(targets)}")
 PY

@@ -411,8 +411,15 @@ def make_patch(rows):
         "# own Linux-flavoured headers, so each object gets the include order and the",
         "# renames its standalone build uses. _CFLAGS_ADD keeps them after the",
         "# kernel's own -D options; a plain _CFLAGS would drop them.",
+        "#",
+        "# -g0 is not cosmetic: ctfconvert reads each object's debug info and cannot",
+        "# size some anonymous unions the Linux headers produce (probe_req, probe_resp,",
+        "# action inside a nameless union in nl80211 attributes). It aborts the kernel",
+        "# link with \"failed to resolve types\" after every object has compiled. These",
+        "# objects carry no CTF anyone needs, and the stack's standalone build used",
+        "# -g0 for the same reason.",
         "FUXI_ATH12K_ROOT = $(SRCROOT)/bsd/fuxi_ath12k",
-        "FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -std=gnu11 \\",
+        "FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -g0 -std=gnu11 \\",
         "\t-isystem $(FUXI_ATH12K_ROOT)/shim/libc",
     ]
     seen = {}

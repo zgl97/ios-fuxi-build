@@ -138,15 +138,22 @@
  bsd/dev/sweet_keys.c			standard
 --- a/bsd/conf/Makefile.template
 +++ b/bsd/conf/Makefile.template
-@@ -54,2 +54,262 @@
+@@ -54,2 +54,269 @@
  hfs_encodinghint.o_CFLAGS_ADD += -Dhfs_allocated=hfs_encodings_allocated
 +
 +# Ath12kWifi Linux stack built in (bsd/fuxi_ath12k). The stack brings its
 +# own Linux-flavoured headers, so each object gets the include order and the
 +# renames its standalone build uses. _CFLAGS_ADD keeps them after the
 +# kernel's own -D options; a plain _CFLAGS would drop them.
++#
++# -g0 is not cosmetic: ctfconvert reads each object's debug info and cannot
++# size some anonymous unions the Linux headers produce (probe_req, probe_resp,
++# action inside a nameless union in nl80211 attributes). It aborts the kernel
++# link with "failed to resolve types" after every object has compiled. These
++# objects carry no CTF anyone needs, and the stack's standalone build used
++# -g0 for the same reason.
 +FUXI_ATH12K_ROOT = $(SRCROOT)/bsd/fuxi_ath12k
-+FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -std=gnu11 \
++FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -g0 -std=gnu11 \
 +	-isystem $(FUXI_ATH12K_ROOT)/shim/libc
 +FUXI_ATH12K_INC_fxa_nw_crypto_mac80211.o = -I$(FUXI_ATH12K_ROOT)/shim/include -I$(FUXI_ATH12K_ROOT)/include -I$(FUXI_ATH12K_ROOT)/out/pinned -I$(FUXI_ATH12K_ROOT)/shim/crypto -I$(FUXI_ATH12K_ROOT)/out -I$(FUXI_ATH12K_ROOT)/src -I$(FUXI_ATH12K_ROOT)/out/mac80211 -I$(FUXI_ATH12K_ROOT)/out/mhi-src -I$(FUXI_ATH12K_ROOT)/out/crypto -I$(FUXI_ATH12K_ROOT)/out/cfg80211 -I$(FUXI_ATH12K_ROOT)/out/ath12k-src -I$(FUXI_ATH12K_ROOT)/out/ath12k-src/wifi7
 +FUXI_ATH12K_DEF_fxa_nw_crypto_mac80211.o = -DCONFIG_ATH12K_DEBUG -DCONFIG_MAC80211_STA_HASH_MAX_SIZE=0 -DCONFIG_CFG80211=1 -DCONFIG_MAC80211=1 -DCONFIG_MAC80211_RC_DEFAULT=\"\" -Dsock_release=nw_sock_release
