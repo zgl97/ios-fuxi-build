@@ -2420,6 +2420,70 @@ wl_smmu_fault(unsigned step)
 	return bad;
 }
 
+/*
+ * The Linux stack gets its DMA from a first-fit arena inside the same IOVA pool
+ * (fuxi_wlan_board.c), but those pages are not one of the fixed buffers above,
+ * so wl_smmu_populate never installs a leaf for them and the endpoint would
+ * fault on the first descriptor it fetches. Install and retract those leaves
+ * here, on the same tables, with the same PTE bits: no new SMMU programming,
+ * only the walk the pool already has.
+ */
+static int
+wl_board_dma_publish(struct wl_dma *d, uint64_t iova)
+{
+	if (!d || !d->va || !d->size || (d->size & PAGE_MASK) || !wl_tables.va || !wl_enabled) {
+		return 1;
+	}
+	if (iova < wl_iova_base || iova >= wl_iova_end || d->size > wl_iova_end - iova) {
+		return 1;
+	}
+	const uint64_t *root = (const uint64_t *)wl_tables.va;
+	const uint64_t *l2 = (const uint64_t *)(wl_tables.va + 4096);
+	if (root[wl_iova_base >> 30] != (wl_pt_pa(1) | 3) ||
+	    l2[(wl_iova_base >> 21) & 511] != (wl_pt_pa(2) | 3)) {
+		return 1;
+	}
+	/* Both lanes share the pool, and the old lane never runs with
+	 * fuxiwifilinux set, so an occupied leaf here is our own bug: refuse the
+	 * allocation rather than alias another buffer's pages. */
+	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+		const uint64_t addr = iova + off;
+		const uint64_t *l3 = (const uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
+		if (l3[(addr >> 12) & 511]) { return 2; }
+	}
+	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+		const uint64_t addr = iova + off;
+		uint64_t *l3 = (uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
+		l3[(addr >> 12) & 511] = wl_phys(d->va + off) | WL_DMA_PTE;
+	}
+	wl_dma_clean(&wl_tables);
+	if (wl_smmu_sync(false)) { return 3; }
+	printf("FUXI WLAN: L1 DMA window published IOVA %#llx-%#llx pages %u CB %u\n",
+	    iova, iova + d->size - 1, (unsigned)(d->size / PAGE_SIZE), wl_cb);
+	return 0;
+}
+
+static void
+wl_board_dma_unpublish(struct wl_dma *d, uint64_t iova)
+{
+	if (!d || !d->va || !d->size || !wl_tables.va) { return; }
+	if (iova < wl_iova_base || iova >= wl_iova_end) { return; }
+	bool cleared = false;
+	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+		const uint64_t addr = iova + off;
+		if (addr >= wl_iova_end) { break; }
+		uint64_t *l3 = (uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
+		const uint64_t pte = wl_phys(d->va + off) | WL_DMA_PTE;
+		if (l3[(addr >> 12) & 511] != pte) { continue; }
+		l3[(addr >> 12) & 511] = 0;
+		cleared = true;
+	}
+	if (!cleared) { return; }
+	wl_dma_clean(&wl_tables);
+	if (wl_smmu_sync(false)) { return; }
+	printf("FUXI WLAN: L1 DMA window unpublished IOVA %#llx-%#llx\n", iova, iova + d->size - 1);
+}
+
 /* Fault-contained cleanup is restricted to this driver's proven vacant slots.
  * BME off + PERST/drain are prerequisites in wl5_abort. Failure quarantines
  * tables and data; never free a table while a walker could still use it. */

@@ -986,6 +986,39 @@ int main(void) {
         assert(wl5_report[19]==30*16 && vectors[29].addr==wl_image.iova+29*WL_CHUNK);
         assert(wl_bhi_mapping_check()==0); wl5_abort(20); assert(frees==4);
     }
+    /* The stack's arena is not one of the fixed buffers, so populate never sees
+       it: publishing must install and retract its own leaves on the live tables
+       and refuse an address the walk does not own. */
+    init();
+    for(unsigned s=17;s<=20;s++) assert(wl5_step(s)==0);
+    struct wl_dma arena={0};
+    assert(wl_dma_alloc(&arena,8192)==0 && wl_enabled);
+    assert(arena.size==PAGE_SIZE);
+    const uint64_t aiova=arena.iova;
+    assert(!walk(aiova));
+    assert(wl_board_dma_publish(&arena,aiova)==0);
+    for(size_t off=0;off<arena.size;off+=PAGE_SIZE) {
+        uint64_t pte=walk(aiova+off);
+        assert((pte&0xfffffffff000ull)==(wl_phys(arena.va+off)&0xfffffffff000ull));
+        assert((pte&0x60000000000fffull)==0x60000000000e63ull);
+    }
+    assert(strstr(logbuf,"L1 DMA window published"));
+    assert(wl_board_dma_publish(&arena,aiova)==2); /* occupied leaf is refused */
+    wl_board_dma_unpublish(&arena,aiova);
+    assert(!walk(aiova));
+    assert(strstr(logbuf,"L1 DMA window unpublished"));
+    /* Bounds and ownership: outside the pool, and before the tables are live. */
+    assert(wl_board_dma_publish(&arena,wl_iova_end)==1);
+    assert(wl_board_dma_publish(&arena,wl_iova_end-4096)==1);
+    assert(wl_board_dma_publish(&arena,wl_iova_base-4096)==1);
+    assert(wl_board_dma_publish(NULL,aiova)==1);
+    /* A retracted leaf is free again, so the same window can be republished. */
+    assert(wl_board_dma_publish(&arena,aiova)==0 && walk(aiova));
+    wl_board_dma_unpublish(&arena,aiova);
+    wl_board_dma_unpublish(NULL,aiova); wl_board_dma_unpublish(&arena,wl_iova_end);
+    assert(!walk(aiova));
+    wl_dma_free(&arena); assert(frees==1);
+    wl5_abort(20); assert(frees==5);
 
     /* Every hardware poll terminates, error EEs are never success. */
     init(); assert(wl5_step(17)==0);

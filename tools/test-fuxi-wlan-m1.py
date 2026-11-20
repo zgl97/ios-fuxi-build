@@ -171,6 +171,22 @@ static void wl_dma_free(struct wl_dma *d) {
     memset(d, 0, sizeof(*d));
 }
 
+/* The arena publishes and retracts its leaves through fuxi_wlan.c, which is not
+ * part of this slice; the arena only needs to know the call succeeded. */
+static unsigned publish_calls, unpublish_calls;
+static unsigned fail_publish_at;   /* 1-based: fail the Nth publish */
+
+static int wl_board_dma_publish(struct wl_dma *d, uint64_t iova) {
+    publish_calls++;
+    assert(d && d->va && d->size && iova >= wl_iova_base);
+    if (fail_publish_at && publish_calls == fail_publish_at) { return 1; }
+    return 0;
+}
+static void wl_board_dma_unpublish(struct wl_dma *d, uint64_t iova) {
+    (void)d; (void)iova;
+    unpublish_calls++;
+}
+
 static struct wl_dma wl_msi_sink;
 
 static void wl_sleep(unsigned ms) { (void)ms; }
@@ -277,6 +293,8 @@ reset_fixtures(void)
     alloc_seq = 0x10000;
     dma_allocs = dma_frees = dma_alloc_n = 0;
     fail_alloc_at = 0;
+    publish_calls = unpublish_calls = 0;
+    fail_publish_at = 0;
     wl_iova_base = 0xa0000000ull;
     wl_iova_end = 0xb0000000ull;
     wl_iova_next = 0xa0000000ull;
@@ -475,6 +493,24 @@ test_dma(void)
     uint64_t b5 = 0;
     assert(wl_board_dma_alloc(64, &b5) == NULL && b5 == 0);
     fail_alloc_at = 0;
+
+    /* A publish failure must not leak the block or the slot: pages without a
+     * leaf would fault the endpoint on the first descriptor it fetches. */
+    const unsigned pubs = publish_calls, frees_before = dma_frees;
+    fail_publish_at = publish_calls + 1;
+    uint64_t b6 = 0;
+    assert(wl_board_dma_alloc(64, &b6) == NULL && b6 == 0);
+    assert(publish_calls == pubs + 1 && dma_frees == frees_before + 1);
+    fail_publish_at = 0;
+    uint64_t b7 = 0;
+    void *p7 = wl_board_dma_alloc(64, &b7);
+    assert(p7 && b7 >= reserved_end);
+    assert(publish_calls == pubs + 2);
+
+    /* Free retracts the leaves before the memory goes back to the kernel. */
+    const unsigned unpubs = unpublish_calls;
+    wl_board_dma_free(64, p7, b7);
+    assert(unpublish_calls == unpubs + 1);
 
     /* Exhausting the slot table fails cleanly instead of aliasing. */
     unsigned got = 0;

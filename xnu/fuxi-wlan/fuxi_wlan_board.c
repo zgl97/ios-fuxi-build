@@ -357,13 +357,18 @@ wl_board_dma_alloc(size_t n, uint64_t *bus)
 	struct wl_dma d;
 	bzero(&d, sizeof(d));
 	if (wl_dma_alloc(&d, bytes)) { return NULL; }
+	/* The arena owns the IOVA, not the bump pointer, and the pages need a leaf
+	 * in the live tables before the endpoint can fetch from them. */
+	wl_iova_next -= d.size;
+	if (wl_board_dma_publish(&d, at)) {
+		wl_dma_free(&d);
+		return NULL;
+	}
 	slot->iova = at;
 	slot->size = d.size;
 	slot->va = d.va;
 	slot->used = true;
 	wl_board_dma_used++;
-	/* d.iova came from the bump pointer; the arena owns the address instead. */
-	wl_iova_next -= d.size;
 	*bus = at;
 	return (void *)d.va;
 }
@@ -380,6 +385,9 @@ wl_board_dma_free(size_t n, void *p, uint64_t bus)
 		bzero(&d, sizeof(d));
 		d.va = wl_board_dma[i].va;
 		d.size = wl_board_dma[i].size;
+		/* Retract the leaves first: the endpoint must stop walking these pages
+		 * before the kernel reuses them. */
+		wl_board_dma_unpublish(&d, wl_board_dma[i].iova);
 		wl_dma_free(&d);
 		bzero(&wl_board_dma[i], sizeof(wl_board_dma[i]));
 		if (wl_board_dma_used) { wl_board_dma_used--; }
