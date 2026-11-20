@@ -33,6 +33,16 @@ done
 # the CI build fails with 139 'unknown type name' errors inside crypto.h.
 [[ $(head -1 bsd/fuxi_ath12k/out/crypto/crypto.h) == '#include "lx.h"' ]] \
     || { echo "staged crypto.h does not include lx.h first"; exit 1; }
+# ath12k's debug.h names struct ath12k_base and struct device in prototypes but
+# includes neither. Entered before core.h, those tags take prototype scope and
+# the definitions in nw_debug.c then conflict. The staged copy must declare both
+# at file scope, ahead of the prototypes.
+[[ $(head -1 bsd/fuxi_ath12k/out/ath12k-src/debug.h) == '#include "lx.h"' ]] \
+    || { echo "staged debug.h does not include lx.h first"; exit 1; }
+[[ $(sed -n 2p bsd/fuxi_ath12k/out/ath12k-src/debug.h) == 'struct ath12k_base;' ]] \
+    || { echo "staged debug.h does not forward-declare struct ath12k_base"; exit 1; }
+[[ $(sed -n 3p bsd/fuxi_ath12k/out/ath12k-src/debug.h) == 'struct device;' ]] \
+    || { echo "staged debug.h does not forward-declare struct device"; exit 1; }
 
 # The Makefile passes -include lx_pci.h, so that name must resolve on the
 # include path the patch declares.

@@ -331,6 +331,17 @@ for sub in ('include', 'shim/include', 'shim/libc', 'shim/crypto', 'out', 'src',
             # and reaches this header through <crypto/crypto.h>. Make the
             # header state its own dependency.
             data = b'#include "lx.h"' + bytes([10]) + data
+        elif header.relative_to(tree).as_posix() == 'out/ath12k-src/debug.h':
+            # ath12k's debug.h declares ath12k_info(struct ath12k_base *),
+            # __ath12k_warn(struct device *) and friends, but includes only
+            # trace.h: it expects core.h to have been included first. When the
+            # header is entered before core.h, C gives those two tags prototype
+            # scope, so the later definitions in nw_debug.c name different
+            # types and clang reports "conflicting types" for all five
+            # functions. Declare the tags at file scope before the prototypes.
+            data = (b'#include "lx.h"' + bytes([10]) +
+                    b'struct ath12k_base;' + bytes([10]) +
+                    b'struct device;' + bytes([10]) + data)
         target.write_bytes(data)
 
 print(f'staged {{len(ENTRIES)}} C files into {{dest}}')
