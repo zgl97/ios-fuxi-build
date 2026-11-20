@@ -211,7 +211,21 @@ for sub in ('include', 'shim/include', 'shim/libc', 'shim/crypto', 'out', 'src',
             # assumption breaks, because XNU's forced include runs before ours
             # and reaches this header through <crypto/crypto.h>. Make the
             # header state its own dependency.
-            data = b'#include "lx.h"' + bytes([10]) + data
+            #
+            # State it, but keep the declarations out of everyone else's way.
+            # crypto.h also declares aes_encrypt(void *, const u8 *, u8 *) and
+            # aes_decrypt(void *, const u8 *, u8 *), which is wpa_supplicant's
+            # internal AES API. Linux has an aes_encrypt of its own in
+            # <crypto/aes.h> with a completely different signature, and
+            # nw_fils.c includes that one: once XNU's forced include has
+            # already pulled this header into the unit, the two collide. Only
+            # the CRYPTO flag group consumes these prototypes, so fence the
+            # body off behind a macro that group defines and nobody else does.
+            body = data
+            data = (b'#include "lx.h"' + bytes([10]) +
+                    b'#if defined(FUXI_ATH12K_WPA_CRYPTO)' + bytes([10]) + body +
+                    bytes([10]) + b'#endif /* FUXI_ATH12K_WPA_CRYPTO */' +
+                    bytes([10]))
         elif header.relative_to(tree).as_posix() == 'out/ath12k-src/debug.h':
             # ath12k's debug.h declares ath12k_info(struct ath12k_base *),
             # __ath12k_warn(struct device *) and friends, but includes only

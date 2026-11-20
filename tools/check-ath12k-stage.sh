@@ -33,6 +33,15 @@ done
 # the CI build fails with 139 'unknown type name' errors inside crypto.h.
 [[ $(head -1 bsd/fuxi_ath12k/out/crypto/crypto.h) == '#include "lx.h"' ]] \
     || { echo "staged crypto.h does not include lx.h first"; exit 1; }
+# Its declarations must stay behind the macro only the CRYPTO flag group
+# defines. crypto.h declares wpa_supplicant's aes_encrypt(void *, const u8 *,
+# u8 *), Linux declares a different aes_encrypt in <crypto/aes.h>, and
+# nw_fils.c includes the Linux one: once XNU's forced include has pulled this
+# header into that unit, the two signatures collide.
+[[ $(sed -n 2p bsd/fuxi_ath12k/out/crypto/crypto.h) == '#if defined(FUXI_ATH12K_WPA_CRYPTO)' ]] \
+    || { echo "staged crypto.h does not fence its declarations"; exit 1; }
+[[ $(tail -1 bsd/fuxi_ath12k/out/crypto/crypto.h) == '#endif /* FUXI_ATH12K_WPA_CRYPTO */' ]] \
+    || { echo "staged crypto.h does not close the fence"; exit 1; }
 # ath12k's debug.h names struct ath12k_base and struct device in prototypes but
 # includes neither. Entered before core.h, those tags take prototype scope and
 # the definitions in nw_debug.c then conflict. The staged copy must declare both
