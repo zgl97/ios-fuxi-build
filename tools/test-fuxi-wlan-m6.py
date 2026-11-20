@@ -154,8 +154,11 @@ static void record(char k, uint64_t pa, uint32_t v) {
 }
 static bool wl_link_refused(uint64_t pa);
 /* Step 19 calls the board layer; the board source is not part of any slice,
- * so every derived test gets this stub from the shared preamble. */
+ * so every derived test gets these stubs from the shared preamble. */
 static void fuxi_wlan_board_init(void) { }
+static int fuxi_wlan_board_start(void) { return 0; }
+static int fuxi_wlan_board_step(void) { return 0; }
+static void fuxi_wlan_board_stop(void) { }
 
 static uint32_t wl_prd(uint64_t pa) {
     if (wl_link_refused(pa)) {fw_faults++; return 0;}

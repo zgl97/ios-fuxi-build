@@ -68,6 +68,8 @@ void fuxi_wlan_board_init(void);
 const struct lx_platform *fuxi_wlan_board_platform(void);
 const struct nw_board *fuxi_wlan_board_table(void);
 int fuxi_wlan_board_start(void);
+int fuxi_wlan_board_step(void);
+void fuxi_wlan_board_stop(void);
 unsigned fuxi_wlan_board_faults(void);
 
 #include "nw_abi.h"
@@ -78,6 +80,10 @@ unsigned fuxi_wlan_board_faults(void);
  * stack start attempt. Kept separate from fuxiwlan so both lanes can be
  * bisected independently. */
 static unsigned wl_linux_variant;
+
+/* Set once nw_wifi_start() returned 0: the stack owns the endpoint from then
+ * on, so the pump and the abort path know whether there is anything to stop. */
+static bool wl_linux_started;
 
 /* ---- host-test injection ----------------------------------------------- */
 
@@ -830,11 +836,45 @@ fuxi_wlan_board_table(void)
 	return &wl_board;
 }
 
+/*
+ * Brings the endpoint up. Variant 1 returns after the board table is built and
+ * leaves the conversation to the old lane; variant 2 hands MHI/CE/HTC to the
+ * linked stack. The firmware allows one conversation per boot, so this is the
+ * only place nw_wifi_start() is called and it is called once.
+ */
 int
 fuxi_wlan_board_start(void)
 {
 	if (wl_board_prepare()) { return 1; }
+	if (!wl_linux_stack) { return 0; }
+	if (wl_linux_started) { return 0; }
+	int error = nw_wifi_start(&wl_board_platform, &wl_board);
+	if (error) {
+		printf("FUXI WLAN: L1 stack start failed: %d\n", error);
+		return error;
+	}
+	wl_linux_started = true;
+	printf("FUXI WLAN: L1 stack started\n");
 	return 0;
+}
+
+/* One pump turn. Nonzero while frames move, so the caller calls again at once
+ * instead of sleeping; zero means the next wait can sleep. */
+int
+fuxi_wlan_board_step(void)
+{
+	if (!wl_linux_started) { return 0; }
+	return nw_wifi_step();
+}
+
+/* Idempotent, and safe before a start: the abort path calls it on every path. */
+void
+fuxi_wlan_board_stop(void)
+{
+	if (!wl_linux_started) { return; }
+	wl_linux_started = false;
+	nw_wifi_stop();
+	printf("FUXI WLAN: L1 stack stopped\n");
 }
 
 /* Fault accounting of the endpoint accessors, so a board test can assert that

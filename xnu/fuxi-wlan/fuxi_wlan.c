@@ -371,6 +371,11 @@ static int wl_m6o_host(unsigned);
  * comes 2,000 lines later, and a call without a prototype is implicitly
  * int(void) — which then conflicts with the real void(void) definition. */
 extern void fuxi_wlan_board_init(void);
+/* The stack's start/step/stop are reached through the board layer, because
+ * nw_abi.h is only visible where fuxi_wlan_board.c is included (end of file). */
+extern int fuxi_wlan_board_start(void);
+extern int fuxi_wlan_board_step(void);
+extern void fuxi_wlan_board_stop(void);
 #define FUXI_WLAN_XNU 1
 #include "wlan.c"
 
@@ -5261,6 +5266,10 @@ wl5_step(unsigned s)
 		 * endpoints, so it must not run -- one conversation per boot. */
 		if (!e && wl_linux_stack) {
 			printf("FUXI WLAN: W10 AMSS EE reached; Linux stack owns MHI/CE/HTC; W11-W15 skipped\n");
+			/* The endpoint is in AMSS and no lane owns it yet: hand it to the
+			 * stack here, the only point where a conversation can start. */
+			int started = fuxi_wlan_board_start();
+			if (started) { return started; }
 			return 0;
 		}
 		if (!e && wl_qrtr) { return wl_w11_run(); }
@@ -5288,6 +5297,8 @@ static void
 wl5_abort(unsigned step)
 {
 	if (wl_w11_attempted) { wl_w11_stop(); }
+	/* Tear the stack down before the endpoint reset: it owns the rings. */
+	fuxi_wlan_board_stop();
 	wl5_status(step);
 	(void)wl_smmu_fault(step);
 	int reset_bad = 0;
@@ -5580,6 +5591,18 @@ fw_thread(void *arg, wait_result_t result)
 	printf("FUXI WLAN: mapped %llu bytes in %u windows; running steps 1..%u\n",
 	    fw_mapped_bytes, mapped, limit);
 	fw_run(limit);
+	/*
+	 * fuxiwifilinux=2 with keep: fw_run stopped at AMSS and handed the endpoint
+	 * to the Linux stack, which has no thread of its own. This one becomes its
+	 * pump: call again at once while frames move, sleep only when idle.
+	 */
+	if (wl_linux_stack && wl_amss_reached && wl_keep) {
+		printf("FUXI WLAN: L1 stack pump running\n");
+		for (;;) {
+			if (fuxi_wlan_board_step()) { continue; }
+			wl_sleep(10);
+		}
+	}
 out:
 	printf("FUXI WLAN: thread exit\n");
 	(void)thread_terminate(current_thread());

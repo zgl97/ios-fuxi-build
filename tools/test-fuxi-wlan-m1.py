@@ -224,6 +224,22 @@ static bool wl_variant_invalid = false;
 static bool wl_w12 = true;
 /* Set by the board layer when fuxiwifilinux=2; fuxi_wlan.c only reads it. */
 static bool wl_linux_stack = false;
+
+/* ---- stack entry points (nw_abi.h); the board layer calls all three ------ */
+
+#include "nw_abi.h"
+
+static unsigned nw_starts, nw_steps, nw_stops;
+static int nw_start_rc;
+static const struct lx_platform *nw_start_plat;
+static const struct nw_board *nw_start_board;
+
+/* nw_abi.h declares these with external linkage, so the stubs must match. */
+int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b) {
+    nw_starts++; nw_start_plat = p; nw_start_board = b; return nw_start_rc;
+}
+int nw_wifi_step(void) { nw_steps++; return 0; }
+void nw_wifi_stop(void) { nw_stops++; }
 '''
 
 TESTS = r'''
@@ -271,6 +287,10 @@ reset_fixtures(void)
     wl_variant_invalid = false;
     wl_w12 = true;
     wl_linux_stack = false;
+    nw_starts = nw_steps = nw_stops = 0;
+    nw_start_rc = 0;
+    nw_start_plat = NULL;
+    nw_start_board = NULL;
     loglen = 0;
     logbuf[0] = 0;
 }
@@ -677,6 +697,11 @@ test_selector(void)
     assert(strstr(logbuf, "board layer ready"));
     /* Variant 1 leaves the old W11-W15 lane in charge. */
     assert(!wl_linux_stack);
+    /* ... and start() never touches the stack. */
+    assert(!fuxi_wlan_board_start() && !nw_starts && !nw_steps && !nw_stops);
+    assert(!fuxi_wlan_board_step() && !nw_steps);
+    fuxi_wlan_board_stop();
+    assert(!nw_stops);
 
     /* Variant 2 hands MHI/CE/HTC to the linked Linux stack and skips the old
      * lane from step 28; the flag is what fuxi_wlan.c's case 28 reads. */
@@ -687,6 +712,35 @@ test_selector(void)
     assert(wl_linux_stack);
     assert(strstr(logbuf, "old W11-W15 lane skipped from step 28"));
     assert(strstr(logbuf, "board layer ready"));
+
+    /* start() hands the endpoint to the stack exactly once, with the same two
+     * tables the board layer exports, and a second call is a no-op. */
+    assert(!fuxi_wlan_board_start());
+    assert(nw_starts == 1);
+    assert(nw_start_plat == fuxi_wlan_board_platform());
+    assert(nw_start_board == fuxi_wlan_board_table());
+    assert(strstr(logbuf, "stack started"));
+    assert(!fuxi_wlan_board_start() && nw_starts == 1);
+    /* step() pumps only while started. */
+    assert(!fuxi_wlan_board_step() && nw_steps == 1);
+    fuxi_wlan_board_stop();
+    assert(nw_stops == 1);
+    assert(!fuxi_wlan_board_step() && nw_steps == 1);
+    fuxi_wlan_board_stop();
+    assert(nw_stops == 1);
+
+    /* A refused start is reported to the caller and leaves nothing to pump. */
+    reset_fixtures();
+    attach_host();
+    boot_linux = "2";
+    fuxi_wlan_board_init();
+    nw_start_rc = -5;
+    assert(fuxi_wlan_board_start() == -5);
+    assert(nw_starts == 1);
+    assert(strstr(logbuf, "stack start failed: -5"));
+    assert(!fuxi_wlan_board_step() && !nw_steps);
+    fuxi_wlan_board_stop();
+    assert(!nw_stops);
 
     /* A device that is not the WCN7850 is refused. */
     reset_fixtures();

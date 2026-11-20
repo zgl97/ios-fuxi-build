@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5622 @@
+@@ -0,0 +1,5645 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -403,6 +403,11 @@
 + * comes 2,000 lines later, and a call without a prototype is implicitly
 + * int(void) — which then conflicts with the real void(void) definition. */
 +extern void fuxi_wlan_board_init(void);
++/* The stack's start/step/stop are reached through the board layer, because
++ * nw_abi.h is only visible where fuxi_wlan_board.c is included (end of file). */
++extern int fuxi_wlan_board_start(void);
++extern int fuxi_wlan_board_step(void);
++extern void fuxi_wlan_board_stop(void);
 +#define FUXI_WLAN_XNU 1
 +#include "wlan.c"
 +
@@ -5293,6 +5298,10 @@
 +		 * endpoints, so it must not run -- one conversation per boot. */
 +		if (!e && wl_linux_stack) {
 +			printf("FUXI WLAN: W10 AMSS EE reached; Linux stack owns MHI/CE/HTC; W11-W15 skipped\n");
++			/* The endpoint is in AMSS and no lane owns it yet: hand it to the
++			 * stack here, the only point where a conversation can start. */
++			int started = fuxi_wlan_board_start();
++			if (started) { return started; }
 +			return 0;
 +		}
 +		if (!e && wl_qrtr) { return wl_w11_run(); }
@@ -5320,6 +5329,8 @@
 +wl5_abort(unsigned step)
 +{
 +	if (wl_w11_attempted) { wl_w11_stop(); }
++	/* Tear the stack down before the endpoint reset: it owns the rings. */
++	fuxi_wlan_board_stop();
 +	wl5_status(step);
 +	(void)wl_smmu_fault(step);
 +	int reset_bad = 0;
@@ -5612,6 +5623,18 @@
 +	printf("FUXI WLAN: mapped %llu bytes in %u windows; running steps 1..%u\n",
 +	    fw_mapped_bytes, mapped, limit);
 +	fw_run(limit);
++	/*
++	 * fuxiwifilinux=2 with keep: fw_run stopped at AMSS and handed the endpoint
++	 * to the Linux stack, which has no thread of its own. This one becomes its
++	 * pump: call again at once while frames move, sleep only when idle.
++	 */
++	if (wl_linux_stack && wl_amss_reached && wl_keep) {
++		printf("FUXI WLAN: L1 stack pump running\n");
++		for (;;) {
++			if (fuxi_wlan_board_step()) { continue; }
++			wl_sleep(10);
++		}
++	}
 +out:
 +	printf("FUXI WLAN: thread exit\n");
 +	(void)thread_terminate(current_thread());
@@ -6208,7 +6231,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,846 @@
+@@ -0,0 +1,886 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6279,6 +6302,8 @@
 +const struct lx_platform *fuxi_wlan_board_platform(void);
 +const struct nw_board *fuxi_wlan_board_table(void);
 +int fuxi_wlan_board_start(void);
++int fuxi_wlan_board_step(void);
++void fuxi_wlan_board_stop(void);
 +unsigned fuxi_wlan_board_faults(void);
 +
 +#include "nw_abi.h"
@@ -6289,6 +6314,10 @@
 + * stack start attempt. Kept separate from fuxiwlan so both lanes can be
 + * bisected independently. */
 +static unsigned wl_linux_variant;
++
++/* Set once nw_wifi_start() returned 0: the stack owns the endpoint from then
++ * on, so the pump and the abort path know whether there is anything to stop. */
++static bool wl_linux_started;
 +
 +/* ---- host-test injection ----------------------------------------------- */
 +
@@ -7041,11 +7070,45 @@
 +	return &wl_board;
 +}
 +
++/*
++ * Brings the endpoint up. Variant 1 returns after the board table is built and
++ * leaves the conversation to the old lane; variant 2 hands MHI/CE/HTC to the
++ * linked stack. The firmware allows one conversation per boot, so this is the
++ * only place nw_wifi_start() is called and it is called once.
++ */
 +int
 +fuxi_wlan_board_start(void)
 +{
 +	if (wl_board_prepare()) { return 1; }
++	if (!wl_linux_stack) { return 0; }
++	if (wl_linux_started) { return 0; }
++	int error = nw_wifi_start(&wl_board_platform, &wl_board);
++	if (error) {
++		printf("FUXI WLAN: L1 stack start failed: %d\n", error);
++		return error;
++	}
++	wl_linux_started = true;
++	printf("FUXI WLAN: L1 stack started\n");
 +	return 0;
++}
++
++/* One pump turn. Nonzero while frames move, so the caller calls again at once
++ * instead of sleeping; zero means the next wait can sleep. */
++int
++fuxi_wlan_board_step(void)
++{
++	if (!wl_linux_started) { return 0; }
++	return nw_wifi_step();
++}
++
++/* Idempotent, and safe before a start: the abort path calls it on every path. */
++void
++fuxi_wlan_board_stop(void)
++{
++	if (!wl_linux_started) { return; }
++	wl_linux_started = false;
++	nw_wifi_stop();
++	printf("FUXI WLAN: L1 stack stopped\n");
 +}
 +
 +/* Fault accounting of the endpoint accessors, so a board test can assert that
