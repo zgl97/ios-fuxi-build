@@ -123,6 +123,23 @@ listed = re.search(r'^\+FUXI_ATH12K_OBJS = (.*)$', patch, re.M).group(1).split()
 if listed != objects:
     raise SystemExit("patch object list and manifest disagree")
 
+# rate.c uses CONFIG_MAC80211_RC_DEFAULT as both a string literal and a
+# strlen() argument, so the flag has to reach the compiler with its quotes
+# intact. It travels through a make variable and then the shell, which strips
+# one level: the plain spelling -D...="" arrives empty and rate.c fails with
+# three errors. Require the escaped spelling in every object's flag line.
+plain = '-DCONFIG_MAC80211_RC_DEFAULT=""'
+escaped = '-DCONFIG_MAC80211_RC_DEFAULT=\\"\\"'
+for obj in objects:
+    line = re.search(r'^\+FUXI_ATH12K_DEF_' + re.escape(obj) + r' = (.*)$',
+                     patch, re.M)
+    if line is None:
+        raise SystemExit(f"patch has no flag line for {obj}")
+    if escaped not in line.group(1):
+        raise SystemExit(f"{obj} does not get the escaped RC_DEFAULT flag")
+    if plain in line.group(1):
+        raise SystemExit(f"{obj} still gets the unescaped RC_DEFAULT flag")
+
 print(f"manifest rows=125 objects={len(set(objects))} heredocs={len(bodies)} "
       f"patch targets={len(targets)}")
 PY

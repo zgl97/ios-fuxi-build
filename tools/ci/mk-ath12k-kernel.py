@@ -90,7 +90,13 @@ DEFINES = [
     "-DCONFIG_MAC80211_STA_HASH_MAX_SIZE=0",
     "-DCONFIG_CFG80211=1",
     "-DCONFIG_MAC80211=1",
-    '-DCONFIG_MAC80211_RC_DEFAULT=""',
+    # rate.c uses this as both a string literal and a strlen() argument, so it
+    # has to arrive as the two-character token "" and not as nothing. These
+    # flags reach the compiler through a make variable, and make hands the
+    # recipe line to the shell, which strips one level of quoting: written
+    # plain, -DCONFIG_MAC80211_RC_DEFAULT="" arrives as -D...= and the macro
+    # expands to empty. Escape the quotes so one level survives the shell.
+    '-DCONFIG_MAC80211_RC_DEFAULT=\\"\\"',
 ]
 # sock_release and the AES entry points are exported by the kernel under the
 # same names the stack uses; rename the stack's side so the kernel keeps its own.
