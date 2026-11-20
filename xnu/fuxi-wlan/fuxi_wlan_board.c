@@ -845,7 +845,10 @@ fuxi_wlan_board_table(void)
 int
 fuxi_wlan_board_start(void)
 {
-	if (wl_board_prepare()) { return 1; }
+	/* Step 19 already prepared the table. Preparing again would re-read config
+	 * space and clear Max_Read_Request a second time, on a wire that is now
+	 * trained and owned; reuse the table when it is there. */
+	if (!wl_board.cfg_read && wl_board_prepare()) { return 1; }
 	if (!wl_linux_stack) { return 0; }
 	if (wl_linux_started) { return 0; }
 	int error = nw_wifi_start(&wl_board_platform, &wl_board);
