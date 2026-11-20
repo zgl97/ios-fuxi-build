@@ -237,6 +237,17 @@ for sub in ('include', 'shim/include', 'shim/libc', 'shim/crypto', 'out', 'src',
             data = (b'#include "lx.h"' + bytes([10]) +
                     b'struct ath12k_base;' + bytes([10]) +
                     b'struct device;' + bytes([10]) + data)
+        elif header.relative_to(tree).as_posix() == 'out/pinned/net/cfg80211.h':
+            # cfg80211.h declares ieee80211_data_to_8023_exthdr(struct sk_buff *,
+            # struct ethhdr *, ...) but includes only Linux headers, so it relies
+            # on whoever includes it to have defined both tags. Inside the kernel
+            # XNU's forced include reaches this header first, the two tags take
+            # prototype scope, and util.c's definition then names different types
+            # -- the same shape as debug.h, one header further along.
+            #
+            # struct ethhdr lives in lx_pci.h, not lx.h, so lx.h alone does not
+            # fix it; lx_pci.h pulls in lx_ath.h and the sk_buff shim as well.
+            data = b'#include "lx_pci.h"' + bytes([10]) + data
         target.write_bytes(data)
 
 print(f'staged {len(ENTRIES)} C files into {dest}')

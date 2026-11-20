@@ -52,6 +52,13 @@ done
     || { echo "staged debug.h does not forward-declare struct ath12k_base"; exit 1; }
 [[ $(sed -n 3p bsd/fuxi_ath12k/out/ath12k-src/debug.h) == 'struct device;' ]] \
     || { echo "staged debug.h does not forward-declare struct device"; exit 1; }
+# cfg80211.h has the same defect one step further along: it declares
+# ieee80211_data_to_8023_exthdr(struct sk_buff *, struct ethhdr *, ...) while
+# including only Linux headers. struct ethhdr is defined in lx_pci.h, not lx.h,
+# so the staged copy has to lead with lx_pci.h for util.c's definition to agree
+# with the declaration.
+[[ $(head -1 bsd/fuxi_ath12k/out/pinned/net/cfg80211.h) == '#include "lx_pci.h"' ]] \
+    || { echo "staged cfg80211.h does not include lx_pci.h first"; exit 1; }
 
 # The Makefile passes -include lx_pci.h, so that name must resolve on the
 # include path the patch declares.
