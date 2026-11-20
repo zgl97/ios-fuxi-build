@@ -23,6 +23,12 @@ for want in bsd/fuxi_ath12k/src/fxa_nw_wifi.c \
             bsd/fuxi_ath12k/out/ath12k-src/core.h; do
     [[ -e $want ]] || { echo "MISSING $want"; exit 1; }
 done
+# nw_crypto_mac80211.c is the only unit that starts at lx_pci.h, and the
+# crypto header it reaches with aes_wrap.h uses u8 and size_t without including
+# anything that defines them. The staged copy must therefore begin with lx.h.
+[[ $(head -1 bsd/fuxi_ath12k/src/fxa_nw_crypto_mac80211.c) == '#include "lx.h"' ]] \
+    || { echo "staged crypto unit does not include lx.h first"; exit 1; }
+
 # The Makefile passes -include lx_pci.h, so that name must resolve on the
 # include path the patch declares.
 grep -q -- '-I$(FUXI_ATH12K_ROOT)/shim/include' "$root/xnu/patches/0117-fuxi-ath12k.patch" \

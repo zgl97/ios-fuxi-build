@@ -176,7 +176,14 @@ for label, rel in ENTRIES:
     target.parent.mkdir(parents=True, exist_ok=True)
     # Dereference: out/ is a symlink farm, and a link leaving bsd/ would break
     # both the linker and any later tarball of the tree.
-    target.write_bytes(source.resolve().read_bytes())
+    data = source.resolve().read_bytes()
+    if label == 'src/nw_crypto_mac80211.c':
+        # This is the one unit whose first include is lx_pci.h, and crypto.h
+        # (pulled in through aes_wrap.h) uses u8 and size_t without including
+        # anything that defines them. State the dependency in the file itself
+        # rather than relying on the forced include reaching it.
+        data = b'#include "lx.h"' + bytes([10]) + data
+    target.write_bytes(data)
 if missing:
     for label, source in missing:
         print(f'missing {source} (from {label})', file=sys.stderr)
