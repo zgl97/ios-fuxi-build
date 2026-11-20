@@ -353,7 +353,7 @@ def make_patch(rows):
         "# renames its standalone build uses. _CFLAGS_ADD keeps them after the",
         "# kernel's own -D options; a plain _CFLAGS would drop them.",
         "FUXI_ATH12K_ROOT = $(SRCROOT)/bsd/fuxi_ath12k",
-        "FUXI_ATH12K_BASE = -include lx_pci.h -w -std=gnu11 \\",
+        "FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -std=gnu11 \\",
         "\t-isystem $(FUXI_ATH12K_ROOT)/shim/libc",
     ]
     seen = {}

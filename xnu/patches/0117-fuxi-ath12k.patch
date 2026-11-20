@@ -146,7 +146,7 @@
 +# renames its standalone build uses. _CFLAGS_ADD keeps them after the
 +# kernel's own -D options; a plain _CFLAGS would drop them.
 +FUXI_ATH12K_ROOT = $(SRCROOT)/bsd/fuxi_ath12k
-+FUXI_ATH12K_BASE = -include lx_pci.h -w -std=gnu11 \
++FUXI_ATH12K_BASE = -include lx.h -include lx_pci.h -w -std=gnu11 \
 +	-isystem $(FUXI_ATH12K_ROOT)/shim/libc
 +FUXI_ATH12K_INC_fxa_nw_crypto_mac80211.o = -I$(FUXI_ATH12K_ROOT)/shim/include -I$(FUXI_ATH12K_ROOT)/include -I$(FUXI_ATH12K_ROOT)/out/pinned -I$(FUXI_ATH12K_ROOT)/shim/crypto -I$(FUXI_ATH12K_ROOT)/out -I$(FUXI_ATH12K_ROOT)/src -I$(FUXI_ATH12K_ROOT)/out/mac80211 -I$(FUXI_ATH12K_ROOT)/out/mhi-src -I$(FUXI_ATH12K_ROOT)/out/crypto -I$(FUXI_ATH12K_ROOT)/out/cfg80211 -I$(FUXI_ATH12K_ROOT)/out/ath12k-src -I$(FUXI_ATH12K_ROOT)/out/ath12k-src/wifi7
 +FUXI_ATH12K_DEF_fxa_nw_crypto_mac80211.o = -DCONFIG_ATH12K_DEBUG -DCONFIG_MAC80211_STA_HASH_MAX_SIZE=0 -DCONFIG_CFG80211=1 -DCONFIG_MAC80211=1 -DCONFIG_MAC80211_RC_DEFAULT="" -Dsock_release=nw_sock_release

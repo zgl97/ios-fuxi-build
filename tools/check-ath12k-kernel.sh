@@ -30,6 +30,12 @@ script = Path(sys.argv[1]).read_text()
 manifest = Path(sys.argv[2]).read_text()
 patch = Path(sys.argv[3]).read_text()
 
+# Every object forces lx.h in before lx_pci.h. lx_pci.h reaches lx.h only through
+# lx_ath.h -> lx_skb.h; a unit that includes lx_pci.h first (nw_crypto_mac80211.c)
+# saw crypto.h parsed before u8 and size_t existed when only lx_pci.h was forced.
+if "-include lx.h -include lx_pci.h" not in patch:
+    raise SystemExit("the forced include must be lx.h then lx_pci.h")
+
 # The staging script only copies sources now; the four XNU files are edited by
 # the patch, because dxb runs every .sh before it applies any .patch.
 bodies = re.findall(r"<<'PY'\n(.*?)\nPY\n", script, re.S)
