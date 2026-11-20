@@ -2449,12 +2449,12 @@ wl_board_dma_publish(struct wl_dma *d, uint64_t iova)
 	/* Both lanes share the pool, and the old lane never runs with
 	 * fuxiwifilinux set, so an occupied leaf here is our own bug: refuse the
 	 * allocation rather than alias another buffer's pages. */
-	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+	for (vm_size_t off = 0; off < d->size; off += 4096) {
 		const uint64_t addr = iova + off;
 		const uint64_t *l3 = (const uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
 		if (l3[(addr >> 12) & 511]) { return 2; }
 	}
-	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+	for (vm_size_t off = 0; off < d->size; off += 4096) {
 		const uint64_t addr = iova + off;
 		uint64_t *l3 = (uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
 		l3[(addr >> 12) & 511] = wl_phys(d->va + off) | WL_DMA_PTE;
@@ -2462,7 +2462,7 @@ wl_board_dma_publish(struct wl_dma *d, uint64_t iova)
 	wl_dma_clean(&wl_tables);
 	if (wl_smmu_sync(false)) { return 3; }
 	printf("FUXI WLAN: L1 DMA window published IOVA %#llx-%#llx pages %u CB %u\n",
-	    iova, iova + d->size - 1, (unsigned)(d->size / PAGE_SIZE), wl_cb);
+	    iova, iova + d->size - 1, (unsigned)(d->size / 4096), wl_cb);
 	return 0;
 }
 
@@ -2472,7 +2472,7 @@ wl_board_dma_unpublish(struct wl_dma *d, uint64_t iova)
 	if (!d || !d->va || !d->size || !wl_tables.va) { return; }
 	if (iova < wl_iova_base || iova >= wl_iova_end) { return; }
 	bool cleared = false;
-	for (vm_size_t off = 0; off < d->size; off += PAGE_SIZE) {
+	for (vm_size_t off = 0; off < d->size; off += 4096) {
 		const uint64_t addr = iova + off;
 		if (addr >= wl_iova_end) { break; }
 		uint64_t *l3 = (uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
@@ -2501,7 +2501,7 @@ wl_board_dma_occupied(uint64_t iova, vm_size_t bytes)
 {
 	if (!bytes || !wl_tables.va || !wl_enabled) { return iova; }
 	if (iova < wl_iova_base || iova >= wl_iova_end || bytes > wl_iova_end - iova) { return iova; }
-	for (vm_size_t off = 0; off < bytes; off += PAGE_SIZE) {
+	for (vm_size_t off = 0; off < bytes; off += 4096) {
 		const uint64_t addr = iova + off;
 		const uint64_t *l3 = (const uint64_t *)(wl_tables.va + (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
 		if (l3[(addr >> 12) & 511]) { return addr; }

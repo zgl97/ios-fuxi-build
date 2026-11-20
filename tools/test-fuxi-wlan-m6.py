@@ -997,15 +997,19 @@ int main(void) {
     const uint64_t aiova=arena.iova;
     assert(!walk(aiova));
     assert(wl_board_dma_publish(&arena,aiova)==0);
-    for(size_t off=0;off<arena.size;off+=PAGE_SIZE) {
+    /* The walk is 4 KiB granular (TG0=0 in CB_TCR) while the VM page is 16 KiB,
+       so every 4 KiB of the window needs its own leaf: one leaf per PAGE_SIZE
+       leaves three quarters unmapped and the endpoint faults at +0x1000. */
+    for(size_t off=0;off<arena.size;off+=4096) {
         uint64_t pte=walk(aiova+off);
         assert((pte&0xfffffffff000ull)==(wl_phys(arena.va+off)&0xfffffffff000ull));
         assert((pte&0x60000000000fffull)==0x60000000000e63ull);
     }
+    assert(walk(aiova+4096) && walk(aiova+8192) && walk(aiova+arena.size-4096));
     assert(strstr(logbuf,"L1 DMA window published"));
     assert(wl_board_dma_publish(&arena,aiova)==2); /* occupied leaf is refused */
     wl_board_dma_unpublish(&arena,aiova);
-    assert(!walk(aiova));
+    assert(!walk(aiova) && !walk(aiova+4096) && !walk(aiova+arena.size-4096));
     assert(strstr(logbuf,"L1 DMA window unpublished"));
     /* Bounds and ownership: outside the pool, and before the tables are live. */
     assert(wl_board_dma_publish(&arena,wl_iova_end)==1);
