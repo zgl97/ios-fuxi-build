@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5755 @@
+@@ -0,0 +1,5804 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -1648,6 +1648,54 @@
 +}
 +
 +/*
++ * D1: which BHI image address did the stack hand the device? mhi_fw_load_bhi()
++ * writes BHI_IMGADDR_LOW/HIGH and BHI_IMGSIZE before the doorbell, and those
++ * registers keep their last host-written value, so one sample after the
++ * transfer recovers them. Printed once; the per-second line stays unchanged.
++ * The map check walks the same live tables wl_board_dma_publish installs into,
++ * so a missing leaf is reported separately from a bad address.
++ */
++static void
++wl_l1_bhi_map_check(uint64_t iova, unsigned bytes)
++{
++	unsigned pages = 0, bad = 0;
++
++	if (!wl_tables.va || !wl_enabled || iova < wl_iova_base || iova >= wl_iova_end) {
++		bad = 1;
++	} else {
++		for (unsigned off = 0; off < bytes; off += 4096) {
++			uint64_t addr = iova + off;
++			if (addr >= wl_iova_end) { bad = 2; break; }
++			const uint64_t *l3 = (const uint64_t *)(wl_tables.va +
++			    (2 + (unsigned)((addr - wl_iova_base) >> 21)) * 4096);
++			if (!(l3[(addr >> 12) & 511] & 3)) { bad = 3; break; }
++			pages++;
++		}
++	}
++	printf("FUXI WLAN: L1 BHI map IOVA %#llx+%#x pages %u/%u %s reason %u\n",
++	    iova, bytes, pages, (bytes + 4095) / 4096, bad ? "FAIL" : "MAPPED", bad);
++}
++
++static void
++wl_l1_bhi_image_note(void)
++{
++	static bool noted;
++	uint32_t status = wl_mrd(wl_bhi + 0x2c);
++
++	if (noted || !status) {
++		return;
++	}
++	noted = true;
++	uint32_t lo = wl_mrd(wl_bhi + 0x08), hi = wl_mrd(wl_bhi + 0x0c), size = wl_mrd(wl_bhi + 0x10);
++	uint64_t iova = ((uint64_t)hi << 32) | lo;
++	printf("FUXI WLAN: L1 BHI image IOVA %#llx+%#x status %#x (stack-written, read back)\n",
++	    iova, size, status);
++	if (size) {
++		wl_l1_bhi_map_check(iova, MIN(size, 0x80000));
++	}
++}
++
++/*
 + * L1 bring-up visibility. wl5_status() only prints after a step has failed, and
 + * by then the abort path has already reset the endpoint, so its EE/MHISTATUS
 + * read as post-abort values. Sample the same registers out of the stack's pump
@@ -1660,6 +1708,7 @@
 +	if (!wl_mhi_valid) {
 +		return;
 +	}
++	wl_l1_bhi_image_note();
 +	uint32_t ee = wl_mrd(wl_bhi + 0x28), st = wl_mrd(0x48), ctrl = wl_mrd(0x38);
 +	printf("FUXI WLAN: L1 state %u ms EE %#x (%s) MHISTATUS %#x (%s ready %u) MHICTRL %#x BHI %#x ERRCODE %#x ERRDBG %#x/%#x/%#x BHIE %#x\n",
 +	    ms, ee, wl_mhi_ee(ee), st, wl_mhi_state((st >> 8) & 255), st & 1,
