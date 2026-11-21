@@ -399,6 +399,15 @@ wl_board_dma_alloc(size_t n, uint64_t *bus)
 	struct wl_dma d;
 	bzero(&d, sizeof(d));
 	if (wl_dma_alloc(&d, bytes)) { return NULL; }
+	/* dma_alloc_coherent hands out memory the device reads without a cache
+	 * flush, and the ported MHI stack never calls dma_sync: it fills ring
+	 * elements and firmware images with plain stores and then rings a doorbell.
+	 * Keep the pages Normal-NC so those stores reach the endpoint; write-back
+	 * pages are what left the device fetching a stale SBL image at READY. */
+	if (wl_dma_nc(&d)) {
+		wl_dma_free(&d);
+		return NULL;
+	}
 	/* The arena owns the IOVA, not the bump pointer, and the pages need a leaf
 	 * in the live tables before the endpoint can fetch from them. */
 	wl_iova_next -= d.size;

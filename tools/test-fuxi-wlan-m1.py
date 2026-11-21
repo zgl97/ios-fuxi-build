@@ -183,6 +183,19 @@ static void wl_dma_free(struct wl_dma *d) {
     memset(d, 0, sizeof(*d));
 }
 
+/* The arena converts its pages to Normal-NC before publishing them: the ported
+ * MHI stack never calls dma_sync, so anything it hands the endpoint has to be
+ * uncached. fuxi_wlan.c owns the conversion; the fixture records the call and
+ * can refuse it to prove the failure path frees the block. */
+static unsigned nc_calls, nc_rc;
+
+static int wl_dma_nc(struct wl_dma *d) {
+    nc_calls++;
+    if (nc_rc) { return nc_rc; }
+    d->nc = true;
+    return 0;
+}
+
 /* The arena publishes and retracts its leaves through fuxi_wlan.c, which is not
  * part of this slice; the arena only needs to know the call succeeded. */
 static unsigned publish_calls, unpublish_calls;
@@ -339,6 +352,7 @@ reset_fixtures(void)
     alloc_seq = 0x10000;
     dma_allocs = dma_frees = dma_alloc_n = 0;
     fail_alloc_at = 0;
+    nc_calls = nc_rc = 0;
     publish_calls = unpublish_calls = 0;
     fail_publish_at = 0;
     occupied_calls = 0;
@@ -528,6 +542,8 @@ test_dma(void)
 
     /* The arena must not consume the bump pointer it overrode. */
     assert(wl_iova_next == wl_iova_base);
+    /* Every block it hands the stack is Normal-NC: the MHI stack never syncs. */
+    assert(nc_calls == 3);
 
     /* map: inside the window gives iova + offset, outside gives 0. */
     assert(wl_board_dma_map(p1, 64, 0) == b1);
@@ -548,6 +564,15 @@ test_dma(void)
     uint64_t b5 = 0;
     assert(wl_board_dma_alloc(64, &b5) == NULL && b5 == 0);
     fail_alloc_at = 0;
+
+    /* Coherency is part of the contract: a block whose pages cannot be made
+     * uncached must never reach the endpoint, and must not leak. */
+    const unsigned ncs = nc_calls, frees_nc = dma_frees;
+    nc_rc = 1;
+    uint64_t bnc = 0;
+    assert(wl_board_dma_alloc(64, &bnc) == NULL && bnc == 0);
+    assert(nc_calls == ncs + 1 && dma_frees == frees_nc + 1);
+    nc_rc = 0;
 
     /* A publish failure must not leak the block or the slot: pages without a
      * leaf would fault the endpoint on the first descriptor it fetches. */
