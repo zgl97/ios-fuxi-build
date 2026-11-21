@@ -656,6 +656,9 @@ wl_board_poll(void)
 	if (now - wl_linux_sample_ms < 1000) { return; }
 	wl_linux_sample_ms = now;
 	wl_l1_state_sample((unsigned)(now - wl_linux_start_ms));
+#if FUXI_WLAN_XNU
+	wl_l1_wifi_note((unsigned)(now - wl_linux_start_ms));
+#endif
 }
 
 /*
@@ -1004,6 +1007,33 @@ wl_board_mmio_trace(volatile void *a, uint32_t v)
 		wl_board_bhi_flush(wl_board_bhi_addr,
 		    wl_board_bhi_size < 0x80000 ? (size_t)wl_board_bhi_size : (size_t)0x80000);
 	}
+}
+#endif /* FUXI_WLAN_XNU */
+
+#if FUXI_WLAN_XNU
+/*
+ * Wi-Fi bring-up visibility: the stack only prints on error, so a probe that
+ * stalls before wiphy registration looks identical to a quiet success. Report
+ * the stage the stack itself records every five seconds; the link line is
+ * read from cached state only (no firmware request).
+ */
+static void
+wl_l1_wifi_note(unsigned ms)
+{
+	static unsigned last;
+	char link[160];
+
+	if (nw_wifi_stats.stage < 2 || ms - last < 5000) {
+		return;
+	}
+	last = ms;
+	link[0] = '\0';
+	if (nw_wifi_stats.stage >= 3) {
+		nw_wifi_link_state(link, sizeof(link));
+	}
+	printf("FUXI WLAN: L1 wifi stage %u last_err %d frames %u scans %u bss %u link %s\n",
+	    nw_wifi_stats.stage, nw_wifi_stats.last_err, nw_wifi_stats.frames,
+	    nw_wifi_stats.scans, nw_wifi_stats.bss_seen, link[0] ? link : "-");
 }
 #endif /* FUXI_WLAN_XNU */
 
