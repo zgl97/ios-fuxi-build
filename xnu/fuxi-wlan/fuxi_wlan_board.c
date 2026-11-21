@@ -85,6 +85,11 @@ static unsigned wl_linux_variant;
  * on, so the pump and the abort path know whether there is anything to stop. */
 static bool wl_linux_started;
 
+/* Set while nw_wifi_start() runs: the pump samples the endpoint's state once a
+ * second so a device stuck at PBL is visible in the log while it waits. */
+static bool wl_linux_starting;
+static uint64_t wl_linux_start_ms, wl_linux_sample_ms;
+
 /*
  * The control channel wants somewhere to send its replies. Under XNU there is
  * no native socket client yet, and cfg80211's nl80211_init() refuses to bind
@@ -637,6 +642,11 @@ static void
 wl_board_poll(void)
 {
 	if (wl_board_host) { return; }
+	if (!wl_linux_starting) { return; }
+	uint64_t now = wl_board_now_ms();
+	if (now - wl_linux_sample_ms < 1000) { return; }
+	wl_linux_sample_ms = now;
+	wl_l1_state_sample((unsigned)(now - wl_linux_start_ms));
 }
 
 /*
@@ -942,7 +952,11 @@ fuxi_wlan_board_start(void)
 	if (nw_wifi_control_transport_set(&wl_board_control) != 0) { /* 0 is NW_CONTROL_OK */
 		printf("FUXI WLAN: L1 control transport not installed; bind will report it\n");
 	}
+	wl_linux_start_ms = wl_linux_sample_ms = wl_board_now_ms();
+	wl_linux_starting = true;
+	printf("FUXI WLAN: L1 stack start entered; sampling the endpoint once a second\n");
 	int error = nw_wifi_start(&wl_board_platform, &wl_board);
+	wl_linux_starting = false;
 	if (error) {
 		printf("FUXI WLAN: L1 stack start failed: %d\n", error);
 		return error;

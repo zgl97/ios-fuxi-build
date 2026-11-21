@@ -1615,6 +1615,27 @@ wl5_status(unsigned step)
 	    r[65] & 1, r[66], r[67], r[68], r[69], r[70], r[71], r[72], r[73]);
 }
 
+/*
+ * L1 bring-up visibility. wl5_status() only prints after a step has failed, and
+ * by then the abort path has already reset the endpoint, so its EE/MHISTATUS
+ * read as post-abort values. Sample the same registers out of the stack's pump
+ * while it waits for the device instead, so a device that never leaves PBL is
+ * distinguishable from one that booted but whose EE event never reached us.
+ */
+static void
+wl_l1_state_sample(unsigned ms)
+{
+	if (!wl_mhi_valid) {
+		return;
+	}
+	uint32_t ee = wl_mrd(wl_bhi + 0x28), st = wl_mrd(0x48), ctrl = wl_mrd(0x38);
+	printf("FUXI WLAN: L1 state %u ms EE %#x (%s) MHISTATUS %#x (%s ready %u) MHICTRL %#x BHI %#x ERRCODE %#x ERRDBG %#x/%#x/%#x BHIE %#x\n",
+	    ms, ee, wl_mhi_ee(ee), st, wl_mhi_state((st >> 8) & 255), st & 1,
+	    ctrl, wl_mrd(wl_bhi + 0x2c), wl_mrd(wl_bhi + 0x30),
+	    wl_mrd(wl_bhi + 0x34), wl_mrd(wl_bhi + 0x38), wl_mrd(wl_bhi + 0x3c),
+	    wl_mrd(wl_bhie + 0x44));
+}
+
 enum {
 	WL_DIAG_STATUS_ONES = 1, WL_DIAG_BAR_LOST = 2, WL_DIAG_CONFIG_LOST = 4,
 	WL_DIAG_LINK_LOST = 8, WL_DIAG_DECODE_CHANGED = 16, WL_DIAG_PERST = 32,

@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5734 @@
+@@ -0,0 +1,5755 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -1645,6 +1645,27 @@
 +	printf("FUXI WLAN: M6 step %u EE %#x (%s) MHISTATUS %#x (%s ready %u) MHICTRL %#x BHI %#x ERRCODE %#x ERRDBG %#x/%#x/%#x BHIE %#x EPcmd %#x\n",
 +	    step, r[64], wl_mhi_ee(r[64]), r[65], wl_mhi_state((r[65] >> 8) & 255),
 +	    r[65] & 1, r[66], r[67], r[68], r[69], r[70], r[71], r[72], r[73]);
++}
++
++/*
++ * L1 bring-up visibility. wl5_status() only prints after a step has failed, and
++ * by then the abort path has already reset the endpoint, so its EE/MHISTATUS
++ * read as post-abort values. Sample the same registers out of the stack's pump
++ * while it waits for the device instead, so a device that never leaves PBL is
++ * distinguishable from one that booted but whose EE event never reached us.
++ */
++static void
++wl_l1_state_sample(unsigned ms)
++{
++	if (!wl_mhi_valid) {
++		return;
++	}
++	uint32_t ee = wl_mrd(wl_bhi + 0x28), st = wl_mrd(0x48), ctrl = wl_mrd(0x38);
++	printf("FUXI WLAN: L1 state %u ms EE %#x (%s) MHISTATUS %#x (%s ready %u) MHICTRL %#x BHI %#x ERRCODE %#x ERRDBG %#x/%#x/%#x BHIE %#x\n",
++	    ms, ee, wl_mhi_ee(ee), st, wl_mhi_state((st >> 8) & 255), st & 1,
++	    ctrl, wl_mrd(wl_bhi + 0x2c), wl_mrd(wl_bhi + 0x30),
++	    wl_mrd(wl_bhi + 0x34), wl_mrd(wl_bhi + 0x38), wl_mrd(wl_bhi + 0x3c),
++	    wl_mrd(wl_bhie + 0x44));
 +}
 +
 +enum {
@@ -6320,7 +6341,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,980 @@
+@@ -0,0 +1,994 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6407,6 +6428,11 @@
 +/* Set once nw_wifi_start() returned 0: the stack owns the endpoint from then
 + * on, so the pump and the abort path know whether there is anything to stop. */
 +static bool wl_linux_started;
++
++/* Set while nw_wifi_start() runs: the pump samples the endpoint's state once a
++ * second so a device stuck at PBL is visible in the log while it waits. */
++static bool wl_linux_starting;
++static uint64_t wl_linux_start_ms, wl_linux_sample_ms;
 +
 +/*
 + * The control channel wants somewhere to send its replies. Under XNU there is
@@ -6960,6 +6986,11 @@
 +wl_board_poll(void)
 +{
 +	if (wl_board_host) { return; }
++	if (!wl_linux_starting) { return; }
++	uint64_t now = wl_board_now_ms();
++	if (now - wl_linux_sample_ms < 1000) { return; }
++	wl_linux_sample_ms = now;
++	wl_l1_state_sample((unsigned)(now - wl_linux_start_ms));
 +}
 +
 +/*
@@ -7265,7 +7296,11 @@
 +	if (nw_wifi_control_transport_set(&wl_board_control) != 0) { /* 0 is NW_CONTROL_OK */
 +		printf("FUXI WLAN: L1 control transport not installed; bind will report it\n");
 +	}
++	wl_linux_start_ms = wl_linux_sample_ms = wl_board_now_ms();
++	wl_linux_starting = true;
++	printf("FUXI WLAN: L1 stack start entered; sampling the endpoint once a second\n");
 +	int error = nw_wifi_start(&wl_board_platform, &wl_board);
++	wl_linux_starting = false;
 +	if (error) {
 +		printf("FUXI WLAN: L1 stack start failed: %d\n", error);
 +		return error;

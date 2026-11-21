@@ -293,6 +293,15 @@ static int transport_set_rc;
 int nw_wifi_control_transport_set(const struct nw_control_transport *t) {
     transport_sets++; transport_installed = t; return transport_set_rc;
 }
+
+/* ---- endpoint state sampler -------------------------------------------- */
+
+/* Defined next to wl5_status() in fuxi_wlan.c; the board layer's poll hook
+ * calls it once a second while the stack starts. This slice compiles the board
+ * layer alone, so it needs the symbol to exist. */
+static unsigned state_samples;
+static unsigned state_sample_ms;
+static void wl_l1_state_sample(unsigned ms) { state_samples++; state_sample_ms = ms; }
 '''
 
 TESTS = r'''
@@ -350,6 +359,8 @@ reset_fixtures(void)
     nw_start_board = NULL;
     transport_sets = 0;
     transport_installed = NULL;
+    state_samples = 0;
+    state_sample_ms = 0;
     fw_va_calls = 0;
     fake_bar0_mapped = true;
     transport_set_rc = 0;
