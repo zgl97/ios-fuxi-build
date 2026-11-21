@@ -1,0 +1,10 @@
+--- a/deps/linux/drivers/net/wireless/ath/ath12k/core.c
++++ b/deps/linux/drivers/net/wireless/ath/ath12k/core.c
+@@ -1286,6 +1286,7 @@
+ 	struct ath12k_hw_group *ag = ath12k_ab_to_ag(ab);
+ 	int ret, i;
+ 
++	lx_log(3, "ath12k: qmi firmware ready\n");
+ 	ret = ath12k_core_start_firmware(ab, ab->fw_mode);
+ 	if (ret) {
+ 		ath12k_err(ab, "failed to start firmware: %d\n", ret);

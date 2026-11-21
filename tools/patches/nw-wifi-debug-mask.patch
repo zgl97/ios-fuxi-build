@@ -1,0 +1,11 @@
+--- a/src/nw_wifi.c
++++ b/src/nw_wifi.c
+@@ -230,7 +230,7 @@
+ }
+ void nw_wifi_set_platform(const struct lx_platform *p) { lx_plat = p; }
+ int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b) {
+-  lx_plat = p; nw_board = b; ath12k_debug_mask = 0; /* Keep info/warnings and counters; skip HTT/WMI debug formatting in normal traffic. */
++  lx_plat = p; nw_board = b; ath12k_debug_mask = 0x20 | 0x40; /* ATH12K_DBG_BOOT | ATH12K_DBG_QMI: show the boot/QMI handshake; skip HTT/WMI debug formatting in normal traffic. */
+   nw_wifi_buffer_pool_configure(1024 * 1024);
+   lx_root_init(); lx_log_tap = log_tap; nw_qrtr_init();
+   int r = nw_mainline_init(); if (r) goto fail;

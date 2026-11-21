@@ -1,0 +1,16 @@
+--- a/deps/linux/drivers/net/wireless/ath/ath12k/mac.c
++++ b/deps/linux/drivers/net/wireless/ath/ath12k/mac.c
+@@ -14698,11 +14698,13 @@
+ 	for_each_ar(ah, ar, i)
+ 		complete_all(&ar->regd_update_completed);
+ 
++	lx_log(3, "ath12k: registering hardware\n");
+ 	ret = ieee80211_register_hw(hw);
+ 	if (ret) {
+ 		ath12k_err(ab, "ieee80211 registration failed: %d\n", ret);
+ 		goto err_cleanup_if_combs;
+ 	}
++	lx_log(3, "ath12k: hardware registered\n");
+ 
+ 	if (is_monitor_disable)
+ 		/* There's a race between calling ieee80211_register_hw()
