@@ -1423,6 +1423,24 @@ wl_dma_civac(struct wl_dma *d)
 	__asm__ volatile("dsb sy" ::: "memory");
 }
 
+/*
+ * Clean+invalidate a VA range by cache line, independent of the CB attributes.
+ * The board layer's D2 hook calls this right before the BHI doorbell: the MHI
+ * stack fills the SBL image with plain stores and never calls dma_sync, so the
+ * endpoint must not be able to fetch anything the CPU has not cleaned.
+ */
+void
+wl_dma_flush_range(vm_offset_t va, size_t n)
+{
+	uint64_t ctr = 0;
+	__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
+	vm_size_t line = (vm_size_t)4 << ((ctr >> 16) & 15);
+	for (size_t off = 0; off < n; off += line) {
+		__asm__ volatile("dc civac, %0" :: "r"(va + off) : "memory");
+	}
+	__asm__ volatile("dsb sy" ::: "memory");
+}
+
 static void
 wl_probe_publish(void)
 {

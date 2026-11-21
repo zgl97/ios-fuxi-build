@@ -29,7 +29,7 @@
  	sweet_sample_start();
 --- a/bsd/dev/fuxi_wlan.c
 +++ b/bsd/dev/fuxi_wlan.c
-@@ -0,0 +1,5804 @@
+@@ -0,0 +1,5822 @@
 +/*
 + * FUXI WLAN (lane-wlan milestones 4/5/6): WCN7850 power-up, PCIe0 link, BAR0
 + * assignment and a read-only MHI/BHI register dump from XNU.
@@ -1451,6 +1451,24 @@
 +	for (vm_size_t off = 0; off < d->size; off += line) {
 +		vm_offset_t va = d->va + off;
 +		__asm__ volatile("dc civac, %0" :: "r"(va) : "memory");
++	}
++	__asm__ volatile("dsb sy" ::: "memory");
++}
++
++/*
++ * Clean+invalidate a VA range by cache line, independent of the CB attributes.
++ * The board layer's D2 hook calls this right before the BHI doorbell: the MHI
++ * stack fills the SBL image with plain stores and never calls dma_sync, so the
++ * endpoint must not be able to fetch anything the CPU has not cleaned.
++ */
++void
++wl_dma_flush_range(vm_offset_t va, size_t n)
++{
++	uint64_t ctr = 0;
++	__asm__ volatile("mrs %0, ctr_el0" : "=r"(ctr));
++	vm_size_t line = (vm_size_t)4 << ((ctr >> 16) & 15);
++	for (size_t off = 0; off < n; off += line) {
++		__asm__ volatile("dc civac, %0" :: "r"(va + off) : "memory");
 +	}
 +	__asm__ volatile("dsb sy" ::: "memory");
 +}
@@ -6390,7 +6408,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,1003 @@
+@@ -0,0 +1,1076 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -7334,6 +7352,73 @@
 +}
 +
 +/*
++ * ---- D2: clean the first BHI image just before its doorbell -------------
++ *
++ * The ported MHI stack fills the 512 KiB SBL image with plain stores and then
++ * rings the BHI doorbell; mhi_fw_load_bhi() never calls dma_sync. The arena is
++ * meant to be Normal-NC (wl_dma_nc), but if pmap_set_cache_attributes left a
++ * page write-back, the endpoint fetches a stale image and never leaves PBL --
++ * the r501/r502 signature. Watch the stack's own MMIO writes through
++ * lx_mmio_trace (lx.h:421-422) and clean the buffer at the IMGTXDB write that
++ * launches the first image. Only instrumentation around the stack's existing
++ * stores: the address and size are exactly what the stack wrote.
++ *
++ * This block is XNU-only; the m1 host harness compiles this file without
++ * fuxi_wlan.c's cache helpers.
++ */
++#if FUXI_WLAN_XNU
++extern void wl_dma_flush_range(vm_offset_t va, size_t n);
++extern void (*lx_mmio_trace)(volatile void *a, uint32_t v);
++
++static volatile void *wl_board_bhi;
++static uint64_t wl_board_bhi_addr;
++static uint32_t wl_board_bhi_size;
++static bool wl_board_bhi_flushed;
++
++static void
++wl_board_bhi_flush(uint64_t bus, size_t n)
++{
++	for (unsigned i = 0; i < WL_BOARD_DMA_SLOTS; i++) {
++		if (!wl_board_dma[i].used) { continue; }
++		if (bus < wl_board_dma[i].iova ||
++		    bus + n > wl_board_dma[i].iova + wl_board_dma[i].size) { continue; }
++		const vm_offset_t va = wl_board_dma[i].va + (bus - wl_board_dma[i].iova);
++		wl_dma_flush_range(va, n);
++		printf("FUXI WLAN: L1 BHI flush IOVA %#llx+%#lx\n",
++		    (unsigned long long)bus, (unsigned long)n);
++		return;
++	}
++	printf("FUXI WLAN: L1 BHI flush IOVA %#llx+%#lx outside the arena\n",
++	    (unsigned long long)bus, (unsigned long)n);
++}
++
++static void
++wl_board_mmio_trace(volatile void *a, uint32_t v)
++{
++	if (!wl_board.bar) { return; }
++	const uintptr_t off = (uintptr_t)a - (uintptr_t)wl_board.bar;
++	if (off >= wl_board.bar_len) { return; }
++	if (!wl_board_bhi) {
++		const uint32_t bhioff = *(volatile uint32_t *)((char *)wl_board.bar + 0x28);
++		if (!bhioff || bhioff >= wl_board.bar_len) { return; }
++		wl_board_bhi = (volatile void *)((uintptr_t)wl_board.bar + bhioff);
++	}
++	const uintptr_t boff = (uintptr_t)a - (uintptr_t)wl_board_bhi;
++	if (boff == 0x0c) {
++		wl_board_bhi_addr = (wl_board_bhi_addr & 0xffffffffull) | ((uint64_t)v << 32);
++	} else if (boff == 0x08) {
++		wl_board_bhi_addr = (wl_board_bhi_addr & 0xffffffff00000000ull) | v;
++	} else if (boff == 0x10) {
++		wl_board_bhi_size = v;
++	} else if (boff == 0x18 && wl_board_bhi_size && !wl_board_bhi_flushed) {
++		wl_board_bhi_flushed = true;
++		wl_board_bhi_flush(wl_board_bhi_addr,
++		    wl_board_bhi_size < 0x80000 ? (size_t)wl_board_bhi_size : (size_t)0x80000);
++	}
++}
++#endif /* FUXI_WLAN_XNU */
++
++/*
 + * Brings the endpoint up. Variant 1 returns after the board table is built and
 + * leaves the conversation to the old lane; variant 2 hands MHI/CE/HTC to the
 + * linked stack. The firmware allows one conversation per boot, so this is the
@@ -7356,6 +7441,12 @@
 +	}
 +	wl_linux_start_ms = wl_linux_sample_ms = wl_board_now_ms();
 +	wl_linux_starting = true;
++#if FUXI_WLAN_XNU
++	/* D2: clean the first BHI image just before its doorbell (see the
++	 * wl_board_mmio_trace block above). Installed only on this path, so the
++	 * old lane and variant 1 never see it. */
++	lx_mmio_trace = wl_board_mmio_trace;
++#endif
 +	printf("FUXI WLAN: L1 stack start entered; sampling the endpoint once a second\n");
 +	int error = nw_wifi_start(&wl_board_platform, &wl_board);
 +	wl_linux_starting = false;
