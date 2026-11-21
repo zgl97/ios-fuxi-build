@@ -1,0 +1,13 @@
+--- a/deps/linux/drivers/net/wireless/ath/ath12k/pci.c
++++ b/deps/linux/drivers/net/wireless/ath/ath12k/pci.c
+@@ -303,7 +303,9 @@
+ 
+ 	ath12k_mhi_clear_vector(ab);
+ 	ath12k_pci_clear_dbg_registers(ab);
+-	ath12k_pci_soc_global_reset(ab);
++	/* keep the running AMSS alive on power-on; only reset the SoC on power-off */
++	if (!power_on)
++		ath12k_pci_soc_global_reset(ab);
+ 	ath12k_mhi_set_mhictrl_reset(ab);
+ }
+ 

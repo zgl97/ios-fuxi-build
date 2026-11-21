@@ -89,6 +89,7 @@ stage 'toolchain compatibility'
 # change.
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-skip-source-lock.patch"
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-build-bug-on-statement.patch"
+patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-skip-soc-reset.patch"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
