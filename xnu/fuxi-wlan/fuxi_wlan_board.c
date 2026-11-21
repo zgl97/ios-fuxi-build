@@ -659,9 +659,6 @@ wl_board_poll(void)
 	if (now - wl_linux_sample_ms < 1000) { return; }
 	wl_linux_sample_ms = now;
 	wl_l1_state_sample((unsigned)(now - wl_linux_start_ms));
-#if FUXI_WLAN_XNU
-	wl_l1_wifi_note((unsigned)(now - wl_linux_start_ms));
-#endif
 }
 
 /*
@@ -1087,6 +1084,16 @@ int
 fuxi_wlan_board_step(void)
 {
 	if (!wl_linux_started) { return 0; }
+#if FUXI_WLAN_XNU
+	{
+		static unsigned last_note;
+		unsigned ms = (unsigned)(wl_board_now_ms() - wl_linux_start_ms);
+		if (ms - last_note >= 1000) {
+			last_note = ms;
+			wl_l1_wifi_note(ms);
+		}
+	}
+#endif
 	return nw_wifi_step();
 }
 
