@@ -6408,7 +6408,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,1106 @@
+@@ -0,0 +1,1109 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -6482,6 +6482,9 @@
 +int fuxi_wlan_board_step(void);
 +void fuxi_wlan_board_stop(void);
 +unsigned fuxi_wlan_board_faults(void);
++#if FUXI_WLAN_XNU
++static void wl_l1_wifi_note(unsigned ms);
++#endif
 +
 +#include "nw_abi.h"
 +

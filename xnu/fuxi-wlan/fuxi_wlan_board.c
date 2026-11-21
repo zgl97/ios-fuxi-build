@@ -71,6 +71,9 @@ int fuxi_wlan_board_start(void);
 int fuxi_wlan_board_step(void);
 void fuxi_wlan_board_stop(void);
 unsigned fuxi_wlan_board_faults(void);
+#if FUXI_WLAN_XNU
+static void wl_l1_wifi_note(unsigned ms);
+#endif
 
 #include "nw_abi.h"
 
