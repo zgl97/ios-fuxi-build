@@ -1,0 +1,32 @@
+--- a/src/nw_qrtr.c
++++ b/src/nw_qrtr.c
+@@ -63,6 +63,9 @@
+   if (!slot) return;
+   slot->used = 1; slot->service = svc; slot->instance = inst; slot->node = node; slot->port = port;
+   for (int i = 0; i < MAX_LOOKUP; i++) if (g_lookup[i].used && lookup_matches(&g_lookup[i], slot)) ctrl_to(g_lookup[i].port, QRTR_TYPE_NEW_SERVER, svc, inst, node, port); }
++void nw_qrtr_seed_server(u32 service, u32 instance, u32 node, u32 port) {
++  ns_new_server(service, instance, node, port);
++  lx_log(3, "qrtr: seeded WLFW server service %#x instance %#x node %u port %u", service, instance, node, port); }
+ static void ns_del_server(u32 svc, u32 inst, u32 node, u32 port) {
+   for (int i = 0; i < MAX_SRV; i++) if (g_srv[i].used && g_srv[i].service == svc && g_srv[i].node == node && g_srv[i].port == port) {
+     g_srv[i].used = 0;
+--- a/src/nw_qrtr.h
++++ b/src/nw_qrtr.h
+@@ -4,6 +4,7 @@
+ /* Where QRTR packets of the remote node go; the MHI channel provides it. */
+ typedef int (*nw_qrtr_xmit_fn)(void *ctx, const void *pkt, size_t len);
+ void nw_qrtr_init(void);
++void nw_qrtr_seed_server(u32 service, u32 instance, u32 node, u32 port);   /* preload a server the firmware already announced */
+ void nw_qrtr_set_endpoint(nw_qrtr_xmit_fn xmit, void *ctx);   /* sends our HELLO */
+ void nw_qrtr_rx(const void *pkt, size_t len);                 /* a packet from the remote node */
+ void nw_qrtr_endpoint_down(void);
+--- a/src/nw_wifi.c
++++ b/src/nw_wifi.c
+@@ -233,6 +233,7 @@
+   lx_plat = p; nw_board = b; ath12k_debug_mask = 0x20 | 0x40; /* ATH12K_DBG_BOOT | ATH12K_DBG_QMI: show the boot/QMI handshake; skip HTT/WMI debug formatting in normal traffic. */
+   nw_wifi_buffer_pool_configure(1024 * 1024);
+   lx_root_init(); lx_log_tap = log_tap; nw_qrtr_init();
++  nw_qrtr_seed_server(0x45, 0x1, 7, 1); /* WLFW, WCN7850 instance, remote node, service port */
+   int r = nw_mainline_init(); if (r) goto fail;
+   r = lx_init_cfg80211_init(); if (r) goto fail;
+   cfg_started = true;
