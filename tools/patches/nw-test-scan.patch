@@ -1,7 +1,17 @@
 diff --git a/src/nw_cfg80211_control.c b/src/nw_cfg80211_control.c
-index f60bd25..90addf9 100644
+index f60bd25..cef1a1b 100644
 --- a/src/nw_cfg80211_control.c
 +++ b/src/nw_cfg80211_control.c
+@@ -72,8 +72,8 @@ static int scan(struct cfg80211_registered_device *rdev, const struct nw_control
+   size_t ie_offset = ssid_offset + (ssid_bytes / 33) * sizeof(struct cfg80211_ssid);
+   struct cfg80211_scan_request_int *request = kzalloc(ie_offset + ie_bytes, GFP_KERNEL);
+   if (!request) return -ENOMEM;
+-  request->req.ssids = (void *)((u8 *)request + ssid_offset);
+   request->req.n_ssids = ssid_bytes / 33;
++  request->req.ssids = request->req.n_ssids ? (void *)((u8 *)request + ssid_offset) : NULL;
+   for (unsigned i = 0; i < request->req.n_ssids; i++) {
+     if (ssids[i * 33] > IEEE80211_MAX_SSID_LEN) { kfree(request); return -EINVAL; }
+     request->req.ssids[i].ssid_len = ssids[i * 33];
 @@ -106,6 +106,23 @@ static int scan(struct cfg80211_registered_device *rdev, const struct nw_control
    dev_hold(primary); nl80211_send_scan_start(rdev, primary->ieee80211_ptr);
    return 0;
