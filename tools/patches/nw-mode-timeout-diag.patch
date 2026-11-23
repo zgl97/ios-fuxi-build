@@ -1,0 +1,88 @@
+--- a/src/nw_qrtr.c
++++ b/src/nw_qrtr.c
+@@ -25,8 +25,24 @@ static nw_qrtr_xmit_fn g_xmit; static void *g_ctx;
+ static int g_hello_sent;
+ static u32 g_remote;      /* node id the remote announced, 0 until the first packet */
+ static u32 g_next_port = 0x4000;
++/* What the endpoint sent us: a QMI request that never gets an answer has two very different causes, and only the receive side tells
++ * them apart - nothing arrived at all, or an answer arrived for a port nobody reads (or was dropped by the QMI transaction table). */
++static u32 g_rx_total, g_rx_data, g_rx_ctrl, g_rx_noport;
++static u32 g_rx_port[8], g_rx_hits[8];
++static u32 g_rx_last_sn, g_rx_last_sp, g_rx_last_dp, g_rx_last_size;
+ 
+-void nw_qrtr_init(void) { memset(g_sock, 0, sizeof g_sock); memset(g_srv, 0, sizeof g_srv); memset(g_lookup, 0, sizeof g_lookup); g_remote = 0; g_next_port = 0x4000; }
++void nw_qrtr_init(void) { memset(g_sock, 0, sizeof g_sock); memset(g_srv, 0, sizeof g_srv); memset(g_lookup, 0, sizeof g_lookup); g_remote = 0; g_next_port = 0x4000;
++  g_rx_total = g_rx_data = g_rx_ctrl = g_rx_noport = 0; memset(g_rx_port, 0, sizeof g_rx_port); memset(g_rx_hits, 0, sizeof g_rx_hits);
++  g_rx_last_sn = g_rx_last_sp = g_rx_last_dp = g_rx_last_size = 0; }
++
++static void rx_port_note(u32 port) {
++  for (int i = 0; i < 8; i++) if (g_rx_port[i] == port) { g_rx_hits[i]++; return; }
++  for (int i = 0; i < 8; i++) if (!g_rx_port[i]) { g_rx_port[i] = port ? port : 1; g_rx_hits[i] = 1; return; } }
++/* The receive side in one line: totals, then the destination ports that were actually addressed. */
++void nw_qrtr_rx_stats(char *b, int n) {
++  int o = snprintf(b, n, "qrtr rx total %u data %u ctrl %u no-port %u last %u:%x->%x %u bytes",
++                   g_rx_total, g_rx_data, g_rx_ctrl, g_rx_noport, g_rx_last_sn, g_rx_last_sp, g_rx_last_dp, g_rx_last_size);
++  for (int i = 0; i < 8 && o > 0 && o < n; i++) if (g_rx_port[i]) o += snprintf(b + o, n - o, " port %x:%u", g_rx_port[i], g_rx_hits[i]); }
+ 
+ static int send_remote(u32 type, u32 sn, u32 sp, u32 dn, u32 dp, const void *p, size_t len, int confirm) {
+   if (!g_xmit) return -ENETDOWN;
+@@ -130,13 +146,18 @@ void nw_qrtr_rx(const void *pkt, size_t len) {
+   if (type != QRTR_TYPE_DATA && type != QRTR_TYPE_RESUME_TX) {
+     /* control traffic is addressed to the name service; the sender's node tells us which node the remote is */
+   }
++  g_rx_total++;
++  if (type == QRTR_TYPE_DATA) { g_rx_data++; g_rx_last_sn = sn; g_rx_last_sp = sp; g_rx_last_dp = dp; g_rx_last_size = size; rx_port_note(dp); }
++  else g_rx_ctrl++;
+   if (!g_remote && sn != LOCAL_NODE && sn != QRTR_NODE_BCAST) g_remote = sn;
+   if (confirm && type == QRTR_TYPE_DATA) {
+     struct qrtr_ctrl_pkt r = { .cmd = cpu_to_le32(QRTR_TYPE_RESUME_TX) }; r.client.node = cpu_to_le32(dn); r.client.port = cpu_to_le32(dp);
+     send_remote(QRTR_TYPE_RESUME_TX, dn, dp, sn, sp, &r, sizeof r, 0);
+   }
+   switch (type) {
+-  case QRTR_TYPE_DATA: { struct sock *s = find_port(dp); lx_log(7, "qrtr: data from %u:%x to port %x, %u bytes%s", sn, sp, dp, size, s ? "" : " (no socket)"); if (s) deliver(s, sn, sp, pl, size); else lx_log(6, "qrtr: no port %x", dp); break; }
++  case QRTR_TYPE_DATA: { struct sock *s = find_port(dp); lx_log(7, "qrtr: data from %u:%x to port %x, %u bytes%s", sn, sp, dp, size, s ? "" : " (no socket)");
++    if (g_rx_data <= 40) lx_log(6, "qrtr: data %u %u:%x->%x %u bytes%s", g_rx_data, sn, sp, dp, size, s ? "" : " (no socket)");
++    if (s) deliver(s, sn, sp, pl, size); else { g_rx_noport++; lx_log(6, "qrtr: no port %x", dp); } break; }
+   case QRTR_TYPE_RESUME_TX: case QRTR_TYPE_PING: case QRTR_TYPE_EXIT: break;
+   default: ns_handle(sn, sp, (const struct qrtr_ctrl_pkt *)pl, size); break;
+   }
+--- a/src/nw_qrtr.h
++++ b/src/nw_qrtr.h
+@@ -8,6 +8,7 @@ void nw_qrtr_seed_server(u32 service, u32 instance, u32 node, u32 port);   /* pr
+ void nw_qrtr_set_endpoint(nw_qrtr_xmit_fn xmit, void *ctx);   /* sends our HELLO */
+ void nw_qrtr_rx(const void *pkt, size_t len);                 /* a packet from the remote node */
+ void nw_qrtr_endpoint_down(void);
++void nw_qrtr_rx_stats(char *b, int n);                          /* totals and addressed ports, for a stuck QMI request */
+ int nw_qrtr_mhi_register(void);
+ void nw_qrtr_mhi_unregister(void);
+ #endif
+--- a/src/nw_wifi.c
++++ b/src/nw_wifi.c
+@@ -187,9 +187,27 @@ void nw_htt_ext_stats(struct ath12k_base *ab, struct sk_buff *skb) {
+     for (unsigned i = 0; i + 4 <= tl && o < (int)sizeof b - 12; i += 4) { u32 v = get_unaligned_le32(p + i); if (v) { o += snprintf(b + o, sizeof b - o, " %u=%u", i / 4, v); any = 1; } }
+     if (any) lx_log(6, "%s", b);
+     p += tl; } }
++/* The firmware answered the mode request over QMI with nothing: the endpoint is still in mission mode, the boot interface holds no error,
++ * and the receive side says whether an answer ever came back. Sampled once, at the moment the wait gives up. */
++static int g_mode_stuck;
++static void mode_state(void) {
++  char b[240];
++  if (nw_board && nw_board->bar) {
++    const volatile u8 *m = nw_board->bar; u32 bhi = readl(m + 0x28);
++    if (bhi >= nw_board->bar_len) bhi = 0x100;
++    lx_log(3, "mode: mhistatus %08x mhictrl %08x ee %08x bhi-status %08x err %08x dbg %08x %08x %08x",
++           readl(m + 0x48), readl(m + 0x38), readl(m + bhi + 0x28), readl(m + bhi + 0x2c), readl(m + bhi + 0x30),
++           readl(m + bhi + 0x34), readl(m + bhi + 0x38), readl(m + bhi + 0x3c)); }
++  nw_qrtr_rx_stats(b, sizeof b); lx_log(3, "mode: %s", b);
++  if (!g_hw) return;
++  struct ath12k *ar = ath12k_ah_to_ar(g_hw->priv, 0); struct ath12k_base *ab = ar->ab;
++  for (int p = 1; p <= 4; p++) ring_state(ab, p);
++  lx_log(3, "mode: wmi credits %d, mhi ee %d state %d", ab->htc.endpoint[ATH12K_HTC_EP_2].tx_credits,
++         ath12k_pci_priv(ab)->mhi_ctrl->ee, ath12k_pci_priv(ab)->mhi_ctrl->dev_state); }
+ static void log_tap(int level, const char *line) {
+   static int done; (void)level;
+   if (!g_wmi_stuck && has_text(line, "wmi command") && has_text(line, "timeout")) g_wmi_stuck = 1;
++  if (!g_mode_stuck && has_text(line, "qmi failed set mode request")) { g_mode_stuck = 1; mode_state(); }
+   if (done || !has_text(line, "MHI_CB_EE_RDDM") || !nw_board || !nw_board->bar) return;
+   done = 1;
+   const volatile u8 *m = nw_board->bar; u32 bhi = readl(m + 0x28);
