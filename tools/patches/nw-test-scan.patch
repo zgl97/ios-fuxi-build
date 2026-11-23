@@ -1,0 +1,45 @@
+diff --git a/src/nw_cfg80211_control.c b/src/nw_cfg80211_control.c
+index f60bd25..90addf9 100644
+--- a/src/nw_cfg80211_control.c
++++ b/src/nw_cfg80211_control.c
+@@ -106,6 +106,23 @@ static int scan(struct cfg80211_registered_device *rdev, const struct nw_control
+   dev_hold(primary); nl80211_send_scan_start(rdev, primary->ieee80211_ptr);
+   return 0;
+ }
++/* Board-side diagnostic: start one scan on the primary interface without a
++ * control-socket client. The control path above still works when a client is
++ * attached; this is only for bringing up an endpoint whose userspace has not
++ * connected yet. */
++int nw_cfg80211_scan_all(void) {
++  if (!primary) return -ENODEV;
++  if (!netif_running(primary)) {
++    rtnl_lock();
++    int opened = dev_open(primary, NULL);
++    rtnl_unlock();
++    if (opened) return opened;
++  }
++  struct cfg80211_registered_device *rdev = wiphy_to_rdev(primary->ieee80211_ptr->wiphy);
++  struct nw_control_view view;
++  memset(&view, 0, sizeof(view));
++  return scan(rdev, &view);
++}
+ static int snapshot_build(struct cfg80211_registered_device *rdev) {
+   snapshot_free(); struct bss_snapshot **tail = &snapshot;
+   size_t memory = 0; unsigned count = 0;
+diff --git a/src/nw_mainline.c b/src/nw_mainline.c
+index b086bc0..a7061d5 100644
+--- a/src/nw_mainline.c
++++ b/src/nw_mainline.c
+@@ -90,6 +90,12 @@ static void ready(struct net_device *dev) {
+   lx_shared_spin_unlock(&boundary_lock);
+   nw_wifi_hw_ready(wiphy_to_ieee80211_hw(dev->ieee80211_ptr->wiphy));
+   nw_wifi_stats.stage = 4;
++  {
++    extern int nw_cfg80211_scan_all(void);
++    int scanned = nw_cfg80211_scan_all();
++    if (scanned) lx_log(4, "wifi: first scan request failed: %d", scanned);
++    else lx_log(3, "wifi: first scan requested");
++  }
+ }
+ static void clear_connection(unsigned state) {
+   status.tx_rate_100kbps = 0;
