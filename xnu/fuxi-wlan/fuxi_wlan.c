@@ -744,6 +744,10 @@ static bool wl_qrtr, wl_w12, wl_w13, wl_w14, wl_w15, wl_w11_attempted, wl_w11_ok
  * MHI/CE/HTC/QRTR through nw_wifi_start(), so the old W11-W15 lane must not run
  * -- both drive the same endpoints and the second one finds them consumed. */
 static bool wl_linux_stack;
+/* Candidate B: step 19 handed the endpoint to the Linux stack before the old
+ * W10 BHIe lane ever loaded AMSS. There is nothing left for fw_run to finish
+ * and the old lane must not touch the shared BHI/BHIe registers afterwards. */
+static bool wl_linux_takeover;
 static unsigned wl15_variant, wl16_variant, wl12_mlo_variant;
 static unsigned wl_rails_variant;
 /* fuxiwlanchunk=1 allocates at the firmware request sizes instead of
@@ -1126,6 +1130,7 @@ wl_probe_configure(void)
 	}
 	wl_bhie_fired = wl_amss_reached = false;
 	wl_linux_stack = false; /* set again by the board layer at step 19 */
+	wl_linux_takeover = false;
 	wl_sbl_ready = wl_contexts_published = wl_sbl_m0 = false;
 	wl_bhie_seq = 0;
 	if ((wl_seq_flags & WL_O_PREFIX) && (wl_full || wl_vec == 1)) { wl_variant_invalid = true; }
@@ -5162,6 +5167,21 @@ wl5_step(unsigned s)
 		 * immediately when unset, so the r491 lane stays byte-identical.
 		 */
 		fuxi_wlan_board_init();
+		/*
+		 * Candidate B: when the Linux stack is selected, hand it the endpoint
+		 * here, while it is still in PBL. The old lane's W10 would load AMSS
+		 * and drive BHI/BHIe itself, consuming the one firmware conversation
+		 * before the stack can start; skipping it lets ath12k load firmware
+		 * from PBL. The board table above is already built and the link is
+		 * trained, so this is the earliest safe point.
+		 */
+		if (wl_linux_stack) {
+			int started = fuxi_wlan_board_start();
+			if (started) { return started; }
+			wl_linux_takeover = true;
+			printf("FUXI WLAN: step 19 Linux takeover; old W10-W15 lane skipped\n");
+			return 0;
+		}
 		return wl_read_firmware();
 	}
 	case 20: {
@@ -5733,6 +5753,16 @@ fw_run(unsigned limit)
 			    s, e, fw_fault_esr, fw_fault_far);
 			goto out;
 		}
+		/*
+		 * Candidate B: the Linux stack now owns the endpoint from step 19.
+		 * Do not run steps 20-28 (the old BHIe/AMSS lane) and do not call
+		 * wl_finish(), which would abort a keep run because wl_amss_reached
+		 * is deliberately false on this path.
+		 */
+		if (s == 19 && wl_linux_takeover) {
+			printf("FUXI WLAN: step 19 takeover complete; fw_run stops before W10\n");
+			goto out;
+		}
 	}
 	printf("FUXI WLAN: %u steps done\n", limit);
 	/* W10 contains successful full runs as well as partial runs. Only explicit
@@ -5773,7 +5803,7 @@ fw_thread(void *arg, wait_result_t result)
 	 * to the Linux stack, which has no thread of its own. This one becomes its
 	 * pump: call again at once while frames move, sleep only when idle.
 	 */
-	if (wl_linux_stack && wl_amss_reached && wl_keep) {
+	if (wl_linux_stack && (wl_amss_reached || wl_linux_takeover) && wl_keep) {
 		printf("FUXI WLAN: L1 stack pump running\n");
 		for (;;) {
 			if (fuxi_wlan_board_step()) { continue; }

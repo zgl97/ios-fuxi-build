@@ -113,6 +113,7 @@ static unsigned wl_pdc_acks, pdc_error;
 static unsigned wl_seq_flags;
 static bool wl_variant_invalid, wl_seq_requested;
 static bool wl_rails_requested;
+static bool wl_linux_takeover; /* candidate B: step 19 handover flag */
 static int wl_rails_on(unsigned variant, const char *where) { return 0; }
 static int wl_cnss_pdc(void) { return pdc_error; } /* peer exercised by M6n suite */
 static void wl5_status(unsigned s) { }
@@ -141,6 +142,7 @@ static void fixture(void) {
     enabled_present=bw_present=false; enabled_arg=bw_arg=0;
     wl_icc_enabled=1; wl_icc_bw=0; wl_icc_configured=wl_icc_ready=wl_icc_failed=false;
     wl_icc_acks=0; rh_poisoned=false; wl_icc_test_expect_votes=true;
+    wl_linux_takeover=false;
     loglen=0; logs[0]=0;
     put32(0,1); put32(4,0x0c0330db);
     put16(8,5); put16(10,0); put16(12,512); put16(14,6); put16(16,0x100);
@@ -342,6 +344,9 @@ int main(void) {
     }
     fixture(); enabled_present=true; enabled_arg=0; wl_icc_test_expect_votes=false;
     fw_run(22); assert(bhi==1 && !triggers && !wl_icc_acks);
+    /* Candidate B: step 19 takeover stops fw_run before the old W10 lane. */
+    fixture(); wl_linux_takeover=true; fw_run(22);
+    assert(bhi==0 && wl5_report[2]==19 && wl5_report[32+19]==0x1013);
     puts("M6i/M6j production cmd-db/encoding/VCD/TCS/ordering/failure tests passed");
     return 0;
 }
