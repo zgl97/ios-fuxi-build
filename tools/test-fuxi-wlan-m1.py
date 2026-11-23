@@ -609,6 +609,10 @@ test_dma(void)
     wl_board_dma_free(64, p9, b9);
     occupied_lo = occupied_hi = 0;
 
+    /* CE1 and CE2 post 510 and 62 receive buffers at startup; the table must
+     * hold those plus the MHI/QMI/firmware allocations that live alongside. */
+    assert(WL_BOARD_DMA_SLOTS >= 1024);
+
     /* Exhausting the slot table fails cleanly instead of aliasing. */
     unsigned got = 0;
     for (unsigned i = 0; i < WL_BOARD_DMA_SLOTS + 8; i++) {

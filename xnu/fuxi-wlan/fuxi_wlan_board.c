@@ -341,7 +341,7 @@ wl_board_free(void *p)
  * needed and the two lanes cannot collide: the old lane never runs with
  * fuxiwifilinux set.
  */
-#define WL_BOARD_DMA_SLOTS 512
+#define WL_BOARD_DMA_SLOTS 4096
 
 struct wl_board_dma_slot {
 	uint64_t iova;
