@@ -99,6 +99,7 @@ patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-mode-
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-test-scan.patch"
 python3 "$root/tools/htc-no-wmi-credits.py" "$DEST"
 python3 "$root/tools/wmi-op-rx-log.py" "$DEST"
+python3 "$root/tools/scan-vdev-start.py" "$DEST"
 python3 "$root/tools/reg-chan-list-fallback.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
