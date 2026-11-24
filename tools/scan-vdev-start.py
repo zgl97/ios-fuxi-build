@@ -33,11 +33,6 @@ new = old + """\
 \t\tstart_ret = ath12k_mac_monitor_vdev_start(ar, arvif->vdev_id,
 \t\t\t\t\t\t\t  &scan_chandef);
 \t\tath12k_info(ar->ab, "scan vdev start %d\\n", start_ret);
-\t\tif (!start_ret) {
-\t\t\tint list_ret = ath12k_reg_update_chan_list(ar, false);
-
-\t\t\tath12k_info(ar->ab, "scan chan list resend %d\\n", list_ret);
-\t\t}
 \t}
 """
 if old not in s:
@@ -48,13 +43,24 @@ s = s.replace(old, new, 1)
 old_log = """\tath12k_info(ab, "scan vdev create id %u type %u ret %d\\n",
 \t\t    arvif->vdev_id, ahvif->vdev_type, ret);
 """
-new_log = """\tath12k_info(ab, "scan vdev create id %u type %u ret %d bssid %pM pdev %u\\n",
-\t\t    arvif->vdev_id, ahvif->vdev_type, ret, arvif->bssid,
+new_log = """\tath12k_info(ab, "scan vdev create id %u type %u ret %d bssid %02x:%02x:%02x:%02x:%02x:%02x pdev %u\\n",
+\t\t    arvif->vdev_id, ahvif->vdev_type, ret,
+\t\t    arvif->bssid[0], arvif->bssid[1], arvif->bssid[2],
+\t\t    arvif->bssid[3], arvif->bssid[4], arvif->bssid[5],
 \t\t    arvif->ar->pdev->pdev_id);
 """
 if old_log not in s:
     raise SystemExit("scan vdev create diagnostic line not found")
 s = s.replace(old_log, new_log, 1)
+
+# Give the firmware a little longer to emit WMI_SCAN_EVENT_STARTED.
+old_wait = """\tret = wait_for_completion_timeout(&ar->scan.started, 1 * HZ);
+"""
+new_wait = """\tret = wait_for_completion_timeout(&ar->scan.started, 3 * HZ);
+"""
+if old_wait not in s:
+    raise SystemExit("scan started wait not found")
+s = s.replace(old_wait, new_wait, 1)
 
 # Log whether the firmware advertised the scan offload service.
 old_scan = """\tret = ath12k_start_scan(ar, arg);
