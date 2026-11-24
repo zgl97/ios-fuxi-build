@@ -12,6 +12,7 @@ import sys
 
 root = pathlib.Path(sys.argv[1])
 mac = root / "deps/linux/drivers/net/wireless/ath/ath12k/mac.c"
+reg = root / "deps/linux/drivers/net/wireless/ath/ath12k/reg.c"
 s = mac.read_text(encoding="utf-8")
 
 old = """\t\tret = ath12k_mac_vdev_create(ar, arvif);
@@ -98,3 +99,25 @@ s = s.replace(old_scan, new_scan, 1)
 
 mac.write_text(s, encoding="utf-8")
 print("scan-vdev-start: patched mac.c")
+
+# Do not let a late regulatory update rewrite the scan channel list while
+# the firmware is starting the first scan; the second list command cancels it.
+reg_s = reg.read_text(encoding="utf-8")
+old_reg = """\tif (ar->ah->state == ATH12K_HW_STATE_RESTARTING)
+\t\treturn 0;
+"""
+new_reg = """\tif (ar->ah->state == ATH12K_HW_STATE_RESTARTING)
+\t\treturn 0;
+
+\tif (ar->scan.state != ATH12K_SCAN_IDLE) {
+\t\tath12k_dbg(ar->ab, ATH12K_DBG_WMI,
+\t\t\t   "skip scan chan list in state %s\\n",
+\t\t\t   ath12k_scan_state_str(ar->scan.state));
+\t\treturn 0;
+\t}
+"""
+if old_reg not in reg_s:
+    raise SystemExit("reg update guard not found")
+reg_s = reg_s.replace(old_reg, new_reg, 1)
+reg.write_text(reg_s, encoding="utf-8")
+print("scan-vdev-start: patched reg.c")
