@@ -102,6 +102,7 @@ python3 "$root/tools/wmi-op-rx-log.py" "$DEST"
 python3 "$root/tools/scan-vdev-start.py" "$DEST"
 python3 "$root/tools/reg-chan-list-fallback.py" "$DEST"
 python3 "$root/tools/idle-ps-off.py" "$DEST"
+python3 "$root/tools/chan-list-skip-6g.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
