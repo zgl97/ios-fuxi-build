@@ -32,6 +32,15 @@ new = """\tcmd_hdr = (struct wmi_cmd_hdr *)skb->data;
 \t\t\tnw_wmi_rx_log++;
 \t\t\tath12k_info(ab, "wmi op rx cmd 0x%x len %d\\n", id, skb->len);
 \t\t}
+\t\tif (id == 0x1d011) {
+\t\t\tstatic int nw_diag_dump;
+\t\t\tif (nw_diag_dump++ < 4 && skb->len >= sizeof(*cmd_hdr) + 32) {
+\t\t\t\tu32 d[8];
+\t\t\t\tmemcpy(d, skb->data + sizeof(*cmd_hdr), sizeof(d));
+\t\t\t\tath12k_info(ab, "diag %08x %08x %08x %08x %08x %08x %08x %08x\\n",
+\t\t\t\t\t    d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]);
+\t\t\t}
+\t\t}
 \t}
 
 \tif (!skb_pull(skb, sizeof(struct wmi_cmd_hdr)))
@@ -187,9 +196,17 @@ old2 = """  struct nw_control_view view;
 """
 new2 = """  struct nw_control_view view;
   memset(&view, 0, sizeof(view));
+  rtnl_lock();
+  if (!netif_running(primary)) {
+    int opened = dev_open(primary, NULL);
+    if (opened) { rtnl_unlock(); return opened; }
+  }
+  wiphy_lock(&rdev->wiphy);
   nw_scan_one = 1;
   int result = scan(rdev, &view);
   nw_scan_one = 0;
+  wiphy_unlock(&rdev->wiphy);
+  rtnl_unlock();
   return result;
 """
 if old2 not in s:
