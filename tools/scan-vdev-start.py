@@ -33,6 +33,11 @@ new = old + """\
 \t\tstart_ret = ath12k_mac_monitor_vdev_start(ar, arvif->vdev_id,
 \t\t\t\t\t\t\t  &scan_chandef);
 \t\tath12k_info(ar->ab, "scan vdev start %d\\n", start_ret);
+\t\tif (!start_ret) {
+\t\t\tint list_ret = ath12k_reg_update_chan_list(ar, false);
+
+\t\t\tath12k_info(ar->ab, "scan chan list resend %d\\n", list_ret);
+\t\t}
 \t}
 """
 if old not in s:
