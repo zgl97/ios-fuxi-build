@@ -100,6 +100,7 @@ patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-test-
 python3 "$root/tools/htc-no-wmi-credits.py" "$DEST"
 python3 "$root/tools/wmi-op-rx-log.py" "$DEST"
 python3 "$root/tools/scan-vdev-start.py" "$DEST"
+python3 "$root/tools/delay-first-scan.py" "$DEST"
 python3 "$root/tools/reg-chan-list-fallback.py" "$DEST"
 python3 "$root/tools/idle-ps-off.py" "$DEST"
 python3 "$root/tools/chan-list-2g-only.py" "$DEST"
