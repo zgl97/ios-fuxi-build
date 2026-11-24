@@ -51,11 +51,11 @@ if old_log not in s:
     raise SystemExit("scan vdev create diagnostic line not found")
 s = s.replace(old_log, new_log, 1)
 
-# Log whether the firmware advertised the scan service.
+# Log whether the firmware advertised the scan offload service.
 old_scan = """\tret = ath12k_start_scan(ar, arg);
 """
-new_scan = """\tath12k_info(ar->ab, "scan svc %d\\n",
-\t\t    test_bit(WMI_SERVICE_SCAN, ab->wmi_ab.svc_map));
+new_scan = """\tath12k_info(ar->ab, "scan svc offload %d\\n",
+\t\t    test_bit(WMI_TLV_SERVICE_SCAN_OFFLOAD, ar->ab->wmi_ab.svc_map));
 \tret = ath12k_start_scan(ar, arg);
 """
 if old_scan not in s:
