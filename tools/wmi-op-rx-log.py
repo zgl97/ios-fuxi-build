@@ -177,15 +177,7 @@ if old_ssid not in s:
 s = s.replace(old_ssid, new_ssid, 1)
 old = """  if (!request->req.n_channels) { kfree(request); return -EINVAL; }
 """
-new = """  if (nw_scan_one && request->req.n_channels > 1) {
-    for (unsigned i = 0; i < request->req.n_channels; i++)
-      if (request->req.channels[i]->center_freq == 2412) {
-        request->req.channels[0] = request->req.channels[i];
-        break;
-      }
-    request->req.n_channels = 1;
-  }
-  if (!request->req.n_channels) { kfree(request); return -EINVAL; }
+new = """  if (!request->req.n_channels) { kfree(request); return -EINVAL; }
 """
 if old not in s:
     raise SystemExit("nw_cfg80211_control.c channel check not found")
