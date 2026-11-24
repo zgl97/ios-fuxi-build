@@ -31,8 +31,12 @@ new = old + """\
 \t\tscan_chandef.chan = chan_list[0];
 \t\tscan_chandef.width = NL80211_CHAN_WIDTH_20;
 \t\tscan_chandef.center_freq1 = chan_list[0]->center_freq;
+\t\tu8 saved_mac[ETH_ALEN];
+\t\tmemcpy(saved_mac, ar->mac_addr, ETH_ALEN);
+\t\tmemcpy(ar->mac_addr, arvif->bssid, ETH_ALEN);
 \t\tstart_ret = ath12k_mac_monitor_vdev_start(ar, arvif->vdev_id,
 \t\t\t\t\t\t\t  &scan_chandef);
+\t\tmemcpy(ar->mac_addr, saved_mac, ETH_ALEN);
 \t\tath12k_info(ar->ab, "scan vdev start %d\\n", start_ret);
 \t}
 """
