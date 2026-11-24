@@ -97,7 +97,7 @@ patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-q
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-qrtr-seed-wlfw-server.patch"
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-mode-timeout-diag.patch"
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-test-scan.patch"
-patch --batch --forward --fuzz=1 -p1 -d "$DEST" -i "$root/tools/patches/ath12k-htc-no-wmi-credits.patch"
+python3 "$root/tools/htc-no-wmi-credits.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
