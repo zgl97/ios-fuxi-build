@@ -182,6 +182,16 @@ new = """  if (!request->req.n_channels) { kfree(request); return -EINVAL; }
 if old not in s:
     raise SystemExit("nw_cfg80211_control.c channel check not found")
 s = s.replace(old, new, 1)
+old_band = """  for (unsigned band = 0; band < NUM_NL80211_BANDS; band++) {
+    struct ieee80211_supported_band *supported = wiphy->bands[band];
+"""
+new_band = """  for (unsigned band = 0; band < NUM_NL80211_BANDS; band++) {
+    if (nw_scan_one && band != NL80211_BAND_2GHZ) continue;
+    struct ieee80211_supported_band *supported = wiphy->bands[band];
+"""
+if old_band not in s:
+    raise SystemExit("nw_cfg80211_control.c band loop not found")
+s = s.replace(old_band, new_band, 1)
 old2 = """  struct nw_control_view view;
   memset(&view, 0, sizeof(view));
   return scan(rdev, &view);
