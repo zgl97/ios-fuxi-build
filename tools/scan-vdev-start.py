@@ -25,7 +25,10 @@ old = """\t\tret = ath12k_mac_vdev_create(ar, arvif);
 new = old + """\
 \tif (create && n_channels > 0) {
 \t\tstruct cfg80211_chan_def scan_chandef = {};
+\t\tstruct ath12k_wmi_scan_chan_list_arg *one;
+\t\tstruct ath12k_wmi_channel_arg *one_ch;
 \t\tint start_ret;
+\t\tint list_ret;
 
 \t\tscan_chandef.chan = chan_list[0];
 \t\tscan_chandef.width = NL80211_CHAN_WIDTH_20;
@@ -33,6 +36,26 @@ new = old + """\
 \t\tstart_ret = ath12k_mac_monitor_vdev_start(ar, arvif->vdev_id,
 \t\t\t\t\t\t\t  &scan_chandef);
 \t\tath12k_info(ar->ab, "scan vdev start %d\\n", start_ret);
+\t\tif (!start_ret) {
+\t\t\tone = kzalloc(sizeof(*one) + sizeof(*one_ch), GFP_KERNEL);
+\t\t\tif (one) {
+\t\t\t\tone->pdev_id = ar->pdev->pdev_id;
+\t\t\t\tone->nallchans = 1;
+\t\t\t\tone_ch = &one->channel[0];
+\t\t\t\tone_ch->chan_id = 1;
+\t\t\t\tone_ch->mhz = 2412;
+\t\t\t\tone_ch->cfreq1 = 2412;
+\t\t\t\tone_ch->maxpower = 40;
+\t\t\t\tone_ch->maxregpower = 40;
+\t\t\t\tone_ch->allow_ht = true;
+\t\t\t\tone_ch->allow_vht = true;
+\t\t\t\tone_ch->allow_he = true;
+\t\t\t\tone_ch->phy_mode = MODE_11G;
+\t\t\t\tlist_ret = ath12k_wmi_send_scan_chan_list_cmd(ar, one);
+\t\t\t\tkfree(one);
+\t\t\t\tath12k_info(ar->ab, "scan chan list one %d\\n", list_ret);
+\t\t\t}
+\t\t}
 \t}
 """
 if old not in s:
