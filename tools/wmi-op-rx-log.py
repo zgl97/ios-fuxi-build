@@ -157,6 +157,15 @@ marker = "static int scan(struct cfg80211_registered_device *rdev, const struct 
 if marker not in s:
     raise SystemExit("nw_cfg80211_control.c scan marker not found")
 s = s.replace(marker, "static int nw_scan_one;\n" + marker, 1)
+old_ssid = """  const u8 *ies = nw_control_get(view, NW_CONTROL_ATTR_IE, &ie_bytes);
+"""
+new_ssid = """  const u8 *ies = nw_control_get(view, NW_CONTROL_ATTR_IE, &ie_bytes);
+  static const u8 nw_probe_ssid[33] = { 4, 'f', 'u', 'x', 'i' };
+  if (nw_scan_one) { ssids = nw_probe_ssid; ssid_bytes = sizeof(nw_probe_ssid); }
+"""
+if old_ssid not in s:
+    raise SystemExit("nw_cfg80211_control.c ssid marker not found")
+s = s.replace(old_ssid, new_ssid, 1)
 old = """  if (!request->req.n_channels) { kfree(request); return -EINVAL; }
 """
 new = """  if (nw_scan_one && request->req.n_channels > 1) {
