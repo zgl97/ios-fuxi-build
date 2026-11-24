@@ -6438,7 +6438,7 @@
 +}
 --- a/bsd/dev/fuxi_wlan_board.c
 +++ b/bsd/dev/fuxi_wlan_board.c
-@@ -0,0 +1,1116 @@
+@@ -0,0 +1,1121 @@
 +/*
 + * FUXI WLAN board layer (milestone 1): the lx_platform + nw_board contract that
 + * the Ath12kWifi Linux stack (ath12k + mac80211 + cfg80211) calls into.
@@ -7508,6 +7508,11 @@
 +	lx_mmio_trace = wl_board_mmio_trace;
 +#endif
 +	printf("FUXI WLAN: L1 stack start entered; sampling the endpoint once a second\n");
++	/* No MSI reaches XNU yet: the endpoint's vectors land in the sink page.
++	 * Tell the stack to poll every registered handler, so the copy-engine
++	 * rings make progress instead of filling up behind an interrupt that
++	 * never arrives. */
++	nw_wifi_irq_mode(0);
 +	int error = nw_wifi_start(&wl_board_platform, &wl_board);
 +	wl_linux_starting = false;
 +	if (error) {

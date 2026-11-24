@@ -1067,6 +1067,11 @@ fuxi_wlan_board_start(void)
 	lx_mmio_trace = wl_board_mmio_trace;
 #endif
 	printf("FUXI WLAN: L1 stack start entered; sampling the endpoint once a second\n");
+	/* No MSI reaches XNU yet: the endpoint's vectors land in the sink page.
+	 * Tell the stack to poll every registered handler, so the copy-engine
+	 * rings make progress instead of filling up behind an interrupt that
+	 * never arrives. */
+	nw_wifi_irq_mode(0);
 	int error = nw_wifi_start(&wl_board_platform, &wl_board);
 	wl_linux_starting = false;
 	if (error) {

@@ -288,6 +288,8 @@ static unsigned nw_starts, nw_steps, nw_stops;
 static int nw_start_rc;
 static const struct lx_platform *nw_start_plat;
 static const struct nw_board *nw_start_board;
+static unsigned nw_irq_modes;
+static int nw_irq_mode_arg;
 
 /* nw_abi.h declares these with external linkage, so the stubs must match. */
 int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b) {
@@ -295,6 +297,7 @@ int nw_wifi_start(const struct lx_platform *p, const struct nw_board *b) {
 }
 int nw_wifi_step(void) { nw_steps++; return 0; }
 void nw_wifi_stop(void) { nw_stops++; }
+void nw_wifi_irq_mode(int delivered) { nw_irq_modes++; nw_irq_mode_arg = delivered; }
 
 /* nw_abi.h declares this with external linkage too. The board installs a
  * transport whose send reports the channel closed; record the install so the
@@ -371,6 +374,8 @@ reset_fixtures(void)
     nw_start_rc = 0;
     nw_start_plat = NULL;
     nw_start_board = NULL;
+    nw_irq_modes = 0;
+    nw_irq_mode_arg = -1;
     transport_sets = 0;
     transport_installed = NULL;
     state_samples = 0;
@@ -885,6 +890,8 @@ test_selector(void)
     transport_installed->wake(NULL);
     assert(nw_start_plat == fuxi_wlan_board_platform());
     assert(nw_start_board == fuxi_wlan_board_table());
+    /* No MSI delivery yet: the board must put the stack into handler polling. */
+    assert(nw_irq_modes == 1 && nw_irq_mode_arg == 0);
     assert(strstr(logbuf, "stack started"));
     assert(!fuxi_wlan_board_start() && nw_starts == 1);
     /* step() pumps only while started. */
