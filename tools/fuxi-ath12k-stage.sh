@@ -143,6 +143,14 @@ python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # scan events so COMPLETED/DEQUEUED is visible.
 python3 "$root/tools/reg-scan-chan-list-guard.py" "$DEST"
 python3 "$root/tools/scan-event-log.py" "$DEST"
+# r567: this firmware never sends WMI_SCAN_EVENT_COMPLETED for the first scan,
+# so cap max_scan_time at 1.5 s, skip the always-timing-out WMI scan-stop, and
+# keep the scan vdev (it is the primary interface's link-0 vdev the station
+# connection needs) instead of deleting it.  Also keep wpa from reading the
+# BSS cache while the scan is still running: it would otherwise authenticate
+# before the vdev is free and every vdev-start would time out.
+python3 "$root/tools/scan-finish-fast.py" "$DEST"
+python3 "$root/tools/scan-result-gate.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
