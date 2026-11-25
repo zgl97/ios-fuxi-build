@@ -18,11 +18,11 @@ idx = s.find(anchor, pos)
 if idx < 0:
     raise SystemExit("scan_event data_lock not found")
 insert = (
-    "\n\tath12k_info(ab, \"NWDIAG scan ev type %u reason %u freq %u req %u scan %u vdev %u state %d\\n\",\n"
+    "\n\tath12k_info(ab, \"NWDIAG scan ev type %u reason %u freq %u req %u scan %u vdev %u state %d jiffies %lu\\n\",\n"
     "\t\t    le32_to_cpu(scan_ev.event_type), le32_to_cpu(scan_ev.reason),\n"
     "\t\t    le32_to_cpu(scan_ev.channel_freq), le32_to_cpu(scan_ev.scan_req_id),\n"
     "\t\t    le32_to_cpu(scan_ev.scan_id), le32_to_cpu(scan_ev.vdev_id),\n"
-    "\t\t    ar->scan.state);\n"
+    "\t\t    ar->scan.state, jiffies);\n"
 )
 s = s[: idx + len(anchor)] + insert + s[idx + len(anchor):]
 
@@ -31,9 +31,9 @@ old = """\tif (!ar) {
 \t\tath12k_warn(ab, "Received scan event for unknown vdev");
 """
 new = """\tif (!ar) {
-\t\tath12k_info(ab, "NWDIAG scan ev unknown vdev %u type %u\\n",
+\t\tath12k_info(ab, "NWDIAG scan ev unknown vdev %u type %u jiffies %lu\\n",
 \t\t\t    le32_to_cpu(scan_ev.vdev_id),
-\t\t\t    le32_to_cpu(scan_ev.event_type));
+\t\t\t    le32_to_cpu(scan_ev.event_type), jiffies);
 \t\tath12k_warn(ab, "Received scan event for unknown vdev");
 """
 if old not in s:
