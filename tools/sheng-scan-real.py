@@ -9,7 +9,7 @@ import pathlib
 import sys
 
 root = pathlib.Path(sys.argv[1])
-path = root / "src/userspace/driver_sheng.c"
+path = root / "userspace/driver_sheng.c"
 s = path.read_text(encoding="utf-8")
 
 # 1. The reuse helper is no longer used once sheng_scan calls the real path.
@@ -96,4 +96,4 @@ if old not in s:
 s = s.replace(old, new, 1)
 
 path.write_text(s, encoding="utf-8")
-print("sheng-scan-real: patched src/userspace/driver_sheng.c")
+print("sheng-scan-real: patched userspace/driver_sheng.c")
