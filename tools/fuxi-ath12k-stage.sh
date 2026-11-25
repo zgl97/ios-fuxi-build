@@ -102,6 +102,7 @@ python3 "$root/tools/wmi-op-rx-log.py" "$DEST"
 # r541: keep the scan vdev created but do not start it; standard mac80211
 # scan only creates a scan vdev and lets WMI_START_SCAN drive the scan.
 # python3 "$root/tools/scan-vdev-start.py" "$DEST"
+python3 "$root/tools/max-scan-ssids.py" "$DEST"
 python3 "$root/tools/delay-first-scan.py" "$DEST"
 python3 "$root/tools/reg-chan-list-fallback.py" "$DEST"
 python3 "$root/tools/idle-ps-off.py" "$DEST"
