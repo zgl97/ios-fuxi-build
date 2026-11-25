@@ -261,6 +261,26 @@ wl_control_wake(void *context)
 }
 
 static int
+wl_control_install(void)
+{
+	const struct nw_control_transport transport = {
+		.context = NULL,
+		.send = wl_control_send,
+		.wake = wl_control_wake,
+	};
+	int status = nw_wifi_control_transport_set(&transport);
+	return status ? wl_control_error(status) : 0;
+}
+
+/*
+ * Registering the control socket early enough to satisfy cfg80211's bind is not
+ * enough: ctl_register() pulls the BSD socket layer in while the root vnode is
+ * still unset, and the firmware request that follows then fails with ENOENT
+ * (rootvnode is not set). Install only the transport before the stack starts and
+ * publish the socket once the stack owns the endpoint, which is well after root
+ * is mounted.
+ */
+static int
 wl_control_start(void)
 {
 	if (wl_ctl_ref) return 0;
@@ -285,17 +305,6 @@ wl_control_start(void)
 #endif
 	errno_t result = ctl_register(&registration, &wl_ctl_ref);
 	if (result) return result;
-	const struct nw_control_transport transport = {
-		.context = NULL,
-		.send = wl_control_send,
-		.wake = wl_control_wake,
-	};
-	int status = nw_wifi_control_transport_set(&transport);
-	if (status) {
-		ctl_deregister(wl_ctl_ref);
-		wl_ctl_ref = NULL;
-		return wl_control_error(status);
-	}
 	return 0;
 }
 
@@ -328,9 +337,15 @@ static const struct nw_control_transport wl_board_control = {
 };
 
 static int
-wl_control_start(void)
+wl_control_install(void)
 {
 	return nw_wifi_control_transport_set(&wl_board_control);
+}
+
+static int
+wl_control_start(void)
+{
+	return 0;
 }
 
 static void
@@ -1270,11 +1285,12 @@ fuxi_wlan_board_start(void)
 	if (!wl_linux_stack) { return 0; }
 	if (wl_linux_started) { return 0; }
 	/* cfg80211's nl80211_init() binds a control channel and refuses to start
-	 * without a transport. Register the kern-control endpoint before the
-	 * stack binds; failure is reported by the stack start below. */
-	int control = wl_control_start();
+	 * without a transport. Install the transport only: registering the socket
+	 * here would pull the BSD socket layer in before the root vnode is set and
+	 * the firmware request that follows would fail with ENOENT. */
+	int control = wl_control_install();
 	if (control) {
-		printf("FUXI WLAN: L1 control endpoint registration failed: %d\n", control);
+		printf("FUXI WLAN: L1 control transport install failed: %d\n", control);
 	}
 	wl_linux_start_ms = wl_linux_sample_ms = wl_board_now_ms();
 	wl_linux_starting = true;
@@ -1308,6 +1324,22 @@ fuxi_wlan_board_step(void)
 {
 	if (!wl_linux_started) { return 0; }
 #if FUXI_WLAN_XNU
+	/* The endpoint is up, so root is mounted: it is safe to bring the socket
+	 * layer in now. Register once; a failure is reported once and retried on
+	 * the next turn so a transient ENOMEM does not lose the endpoint. */
+	if (!wl_ctl_ref) {
+		static bool reported;
+		int registered = wl_control_start();
+		if (registered) {
+			if (!reported) {
+				reported = true;
+				printf("FUXI WLAN: L1 control endpoint registration failed: %d\n",
+				    registered);
+			}
+		} else {
+			printf("FUXI WLAN: L1 control endpoint registered\n");
+		}
+	}
 	{
 		static unsigned last_note;
 		unsigned ms = (unsigned)(wl_board_now_ms() - wl_linux_start_ms);
