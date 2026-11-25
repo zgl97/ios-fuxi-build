@@ -134,9 +134,12 @@ python3 "$root/tools/vdev-start-delay-off.py" "$DEST"
 # 3 s, wpa cancels the scan and every later WMI command times out.  r565 tried
 # skipping it entirely, but the device wpa binary still uses the board-scan
 # reuse path and never scans on its own.  r566 delays the same single 2.4 GHz
-# passive scan by 12 s: wpa initializes first, then the board scan fills the
-# BSS cache its reuse path reads.
+# passive scan until wpa has initialized, then the board scan fills the BSS
+# cache its reuse path reads.  r570 waits for a completed INFO exchange on a
+# still-open control socket instead of a fixed delay, because a failing wpa
+# instance aborts the scan when it tears the interface down.
 python3 "$root/tools/defer-first-scan.py" "$DEST"
+python3 "$root/tools/scan-after-client.py" "$DEST"
 python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # r565: keep a late regulatory update from rewriting WMI_SCAN_CHAN_LIST while
 # the first scan is starting (the second list command cancels it), and log all
@@ -144,13 +147,15 @@ python3 "$root/tools/sheng-scan-real.py" "$DEST"
 python3 "$root/tools/reg-scan-chan-list-guard.py" "$DEST"
 python3 "$root/tools/scan-event-log.py" "$DEST"
 # r567: this firmware never sends WMI_SCAN_EVENT_COMPLETED for the first scan,
-# so cap max_scan_time at 1.5 s, skip the always-timing-out WMI scan-stop, and
+# so cap max_scan_time at 8 s, skip the always-timing-out WMI scan-stop, and
 # keep the scan vdev (it is the primary interface's link-0 vdev the station
 # connection needs) instead of deleting it.  Also keep wpa from reading the
 # BSS cache while the scan is still running: it would otherwise authenticate
 # before the vdev is free and every vdev-start would time out.
 python3 "$root/tools/scan-finish-fast.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
+# r570: log which kernel path aborts the one scan the firmware will complete.
+python3 "$root/tools/scan-abort-diag.py" "$DEST"
 # r568: follow an authentication frame from mac80211 into WMI/CE3 and widen
 # the CE3/CE4 tx-completion sampling.
 python3 "$root/tools/mgmt-tx-diag.py" "$DEST"

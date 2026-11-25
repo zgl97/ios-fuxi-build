@@ -30,10 +30,15 @@ old = """  nw_wifi_stats.stage = 4;
   }
 """
 new = """  nw_wifi_stats.stage = 4;
-  /* Let wpa_supplicant initialize and start its scan cycle before the board
-   * path takes the interface locks.  Running this scan earlier makes wpa's
-   * INFO request time out and wedges the firmware. */
-  lx_delay_ms(12000);
+  /* r570: wait until wpa_supplicant has completed an INFO exchange and kept
+   * the control socket open.  A scan started while a failing instance tears
+   * the interface down is aborted by ath12k_mac_op_unassign_vif_chanctx. */
+  for (int waited = 0; waited < 300; waited++) {
+    extern int nw_cfg80211_client_ready(void);
+    if (nw_cfg80211_client_ready()) break;
+    lx_delay_ms(200);
+  }
+  lx_delay_ms(500);
   {
     extern int nw_cfg80211_scan_all(void);
     int scanned = nw_cfg80211_scan_all();
