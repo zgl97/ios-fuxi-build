@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
-"""Leave the first cfg80211 scan to wpa_supplicant.
+"""Delay the board-path scan until after wpa_supplicant has initialized.
 
-The board-path scan consumes vdev 0 before wpa_supplicant starts.  While it
-runs, the control workqueue is stuck in dev_close()/rtnl paths, so wpa's INFO
-request times out, wpa cancels the scan and the firmware wedges.  Skipping the
-boot scan lets wpa's own scan be the first (vdev 0) scan and run to completion.
+The board-path scan consumes vdev 0.  When it runs during netdev registration
+it holds the interface locks for seconds; wpa's INFO request then times out,
+wpa cancels the scan and the firmware wedges.  Starting it later - after wpa
+has opened the interface and run its first scan cycle - lets wpa initialize
+cleanly while still giving its reuse path a populated BSS cache.
+
+r566: the device wpa_supplicant still uses the board-scan reuse path, so the
+kernel must supply the scan results.  Wait long enough for wpa to settle, then
+run the same single 2.4 GHz passive scan the board path always used.
 """
 import pathlib
 import sys
@@ -25,13 +30,19 @@ old = """  nw_wifi_stats.stage = 4;
   }
 """
 new = """  nw_wifi_stats.stage = 4;
-  /* Let register_netdevice()/the cfg80211 notification settle.  The first
-   * scan is left to wpa_supplicant so that it owns vdev 0. */
-  lx_delay_ms(3000);
-  lx_log(3, "wifi: first scan deferred to wpa_supplicant");
+  /* Let wpa_supplicant initialize and start its scan cycle before the board
+   * path takes the interface locks.  Running this scan earlier makes wpa's
+   * INFO request time out and wedges the firmware. */
+  lx_delay_ms(12000);
+  {
+    extern int nw_cfg80211_scan_all(void);
+    int scanned = nw_cfg80211_scan_all();
+    if (scanned) lx_log(4, "wifi: delayed first scan request failed: %d", scanned);
+    else lx_log(3, "wifi: delayed first scan requested");
+  }
 """
 if old not in s:
-    raise SystemExit("delay-first-scan block not found")
+    raise SystemExit("defer-first-scan block not found")
 s = s.replace(old, new, 1)
 path.write_text(s, encoding="utf-8")
-print("defer-first-scan: patched src/nw_mainline.c")
+print("defer-first-scan: patched src/nw_mainline.c (delayed board scan)")

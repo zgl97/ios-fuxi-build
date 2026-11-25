@@ -129,11 +129,13 @@ python3 "$root/tools/peer-htt-diag.py" "$DEST"
 # wcn7850 hw2.0 vdev_start_delay to false so assign_vif_chanctx starts the vdev
 # first. qcc2072's identical line is left untouched.
 python3 "$root/tools/vdev-start-delay-off.py" "$DEST"
-# r565: hand the first scan to wpa_supplicant. r564 showed the boot scan starts
-# on vdev 0, never reports COMPLETED, and wedges the control workqueue: wpa's
-# INFO request times out at 3 s, wpa cancels the scan and every later WMI
-# command (vdev delete/start/peer create) times out. Without the boot scan the
-# wpa scan owns vdev 0 and sheng_scan must really issue NW_CONTROL_SCAN.
+# r565/r566: the boot scan must not run while wpa_supplicant initializes: it
+# holds the interface locks long enough that wpa's INFO request times out at
+# 3 s, wpa cancels the scan and every later WMI command times out.  r565 tried
+# skipping it entirely, but the device wpa binary still uses the board-scan
+# reuse path and never scans on its own.  r566 delays the same single 2.4 GHz
+# passive scan by 12 s: wpa initializes first, then the board scan fills the
+# BSS cache its reuse path reads.
 python3 "$root/tools/defer-first-scan.py" "$DEST"
 python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # r565: keep a late regulatory update from rewriting WMI_SCAN_CHAN_LIST while
