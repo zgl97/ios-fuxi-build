@@ -151,6 +151,9 @@ python3 "$root/tools/scan-event-log.py" "$DEST"
 # before the vdev is free and every vdev-start would time out.
 python3 "$root/tools/scan-finish-fast.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
+# r568: follow an authentication frame from mac80211 into WMI/CE3 and widen
+# the CE3/CE4 tx-completion sampling.
+python3 "$root/tools/mgmt-tx-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
