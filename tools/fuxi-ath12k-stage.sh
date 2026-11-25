@@ -99,6 +99,13 @@ patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-mode-
 patch --batch --forward --fuzz=0 -p1 -d "$DEST" -i "$root/tools/patches/nw-test-scan.patch"
 python3 "$root/tools/htc-no-wmi-credits.py" "$DEST"
 python3 "$root/tools/wmi-op-rx-log.py" "$DEST"
+# r564: the first scan makes the debug firmware emit a burst of ~106
+# WMI_DIAG_EVENTID (0x1d011) messages of ~1.5 KB.  Printing every one of them
+# on the slow console stalls the CE2 rx work long enough that the ring fills
+# and the firmware goes silent (no vdev delete/start response, no PEER_MAP).
+# Quiet the diag flood and grow the WMI receive ring so the burst fits.
+python3 "$root/tools/wmi-log-quiet.py" "$DEST"
+python3 "$root/tools/ce2-ring-512.py" "$DEST"
 # r541: keep the scan vdev created but do not start it; standard mac80211
 # scan only creates a scan vdev and lets WMI_START_SCAN drive the scan.
 # python3 "$root/tools/scan-vdev-start.py" "$DEST"
