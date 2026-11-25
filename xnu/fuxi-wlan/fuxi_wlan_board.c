@@ -59,7 +59,6 @@
 #include <vm/pmap.h>
 #if FUXI_WLAN_XNU
 #include <sys/kern_control.h>
-#include <sys/kern_control_private.h>
 #include <sys/kpi_mbuf.h>
 #include <sys/errno.h>
 #include <IOKit/IOLib.h>
@@ -212,12 +211,14 @@ wl_control_receive(kern_ctl_ref kctl, uint32_t unit, void *information,
 	return wl_control_error(status);
 }
 
+#ifdef KERNEL_PRIVATE
 static void
 wl_control_rcvd(kern_ctl_ref kctl, uint32_t unit, void *information, int flags)
 {
 	(void)kctl; (void)unit; (void)flags;
 	nw_wifi_control_writable(((struct wl_control_client *)information)->session);
 }
+#endif /* KERNEL_PRIVATE */
 
 static errno_t
 wl_control_getopt(kern_ctl_ref kctl, uint32_t unit, void *information,
@@ -268,14 +269,20 @@ wl_control_start(void)
 	struct kern_ctl_reg registration = {};
 	snprintf(registration.ctl_name, sizeof(registration.ctl_name), "%s",
 	    "org.unixnu.wifi.control");
+#ifdef KERNEL_PRIVATE
 	registration.ctl_flags = CTL_FLAG_PRIVILEGED | CTL_FLAG_REG_EXTENDED;
+#else
+	registration.ctl_flags = CTL_FLAG_PRIVILEGED;
+#endif
 	registration.ctl_sendsize = 256 * 1024;
 	registration.ctl_recvsize = 512 * 1024;
 	registration.ctl_connect = wl_control_connect;
 	registration.ctl_disconnect = wl_control_disconnect;
 	registration.ctl_send = wl_control_receive;
 	registration.ctl_getopt = wl_control_getopt;
+#ifdef KERNEL_PRIVATE
 	registration.ctl_rcvd = wl_control_rcvd;
+#endif
 	errno_t result = ctl_register(&registration, &wl_ctl_ref);
 	if (result) return result;
 	const struct nw_control_transport transport = {
