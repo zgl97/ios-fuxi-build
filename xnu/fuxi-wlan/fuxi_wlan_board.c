@@ -57,6 +57,14 @@
 #include <pexpert/pexpert.h>
 #include <vm/vm_kern.h>
 #include <vm/pmap.h>
+#if FUXI_WLAN_XNU
+#include <sys/kern_control.h>
+#include <sys/kern_control_private.h>
+#include <sys/kpi_mbuf.h>
+#include <sys/errno.h>
+#include <IOKit/IOLib.h>
+#include <IOKit/IOLocks.h>
+#endif
 
 /*
  * The board layer's exported entry points. fuxi_wlan.c carries its own
@@ -93,16 +101,206 @@ static bool wl_linux_started;
 static bool wl_linux_starting;
 static uint64_t wl_linux_start_ms, wl_linux_sample_ms;
 
+#if FUXI_WLAN_XNU
 /*
- * The control channel wants somewhere to send its replies. Under XNU there is
- * no native socket client yet, and cfg80211's nl80211_init() refuses to bind
- * without a transport (nw_control.c: nw_wifi_control_bind returns
- * NW_CONTROL_NOT_READY, which nl80211_init turns into -EBUSY). Install a
- * transport that reports every send as closed: the channel then drops the
- * reply and detaches the client rather than retrying forever, and the stack
- * starts. The transport survives nw_wifi_control_shutdown(), so one install
- * covers every start.
+ * The control channel's native transport.  wpa_supplicant talks to
+ * org.unixnu.wifi.control through XNU's kern-control socket; this is the
+ * counterpart of sheng's WifiProbe controlStart/controlSend path.  The
+ * transport was previously a closed stub, which made every supplicant
+ * connect fail with ENOENT before the first nl80211 request could arrive.
  */
+struct wl_control_client {
+	uint64_t session;
+	uint32_t unit;
+};
+
+static kern_ctl_ref wl_ctl_ref;
+static IOLock *wl_ctl_lock;
+static struct wl_control_client *wl_ctl_client;
+
+/* Values from include/nw_control.h; nw_abi.h deliberately carries only the
+ * transport enum because this file is compiled without the userspace header. */
+#define WL_NW_CONTROL_OK		0
+#define WL_NW_CONTROL_INVALID		1
+#define WL_NW_CONTROL_BUSY		2
+#define WL_NW_CONTROL_NOT_READY		3
+#define WL_NW_CONTROL_AUTH_FAILED	4
+#define WL_NW_CONTROL_TIMED_OUT		5
+#define WL_NW_CONTROL_UNSUPPORTED	6
+#define WL_NW_CONTROL_NO_MEMORY		7
+#define WL_NW_CONTROL_NOT_FOUND		8
+#define WL_NW_CONTROL_DRIVER_FAILED	9
+#define WL_NW_CONTROL_STALE		10
+
+#define WL_NW_CONTROL_GET_SESSION	1
+
+/* These live in the Ath12kWifi endpoint (nw_control.c); the kernel side is
+ * linked with that stack and only needs the prototypes. */
+extern int nw_wifi_control_attach(uint64_t *session);
+extern int nw_wifi_control_receive(uint64_t session, size_t length,
+    int (*reader)(void *, void *, size_t), void *context);
+extern void nw_wifi_control_writable(uint64_t session);
+extern void nw_wifi_control_detach(uint64_t session);
+
+static errno_t
+wl_control_error(int status)
+{
+	switch (status) {
+	case WL_NW_CONTROL_OK: return 0;
+	case WL_NW_CONTROL_INVALID: return EINVAL;
+	case WL_NW_CONTROL_BUSY: return EWOULDBLOCK;
+	case WL_NW_CONTROL_NOT_READY: return ENXIO;
+	case WL_NW_CONTROL_AUTH_FAILED: return EACCES;
+	case WL_NW_CONTROL_TIMED_OUT: return ETIMEDOUT;
+	case WL_NW_CONTROL_UNSUPPORTED: return EOPNOTSUPP;
+	case WL_NW_CONTROL_NO_MEMORY: return ENOBUFS;
+	case WL_NW_CONTROL_NOT_FOUND: return ENOENT;
+	case WL_NW_CONTROL_STALE: return ESTALE;
+	default: return EIO;
+	}
+}
+
+static errno_t
+wl_control_connect(kern_ctl_ref kctl, struct sockaddr_ctl *address, void **information)
+{
+	(void)kctl;
+	struct wl_control_client *owner = IOMalloc(sizeof(*owner));
+	if (!owner) return ENOMEM;
+	int status = nw_wifi_control_attach(&owner->session);
+	if (status) {
+		IOFree(owner, sizeof(*owner));
+		return wl_control_error(status);
+	}
+	owner->unit = address->sc_unit;
+	IOLockLock(wl_ctl_lock);
+	wl_ctl_client = owner;
+	IOLockUnlock(wl_ctl_lock);
+	*information = owner;
+	return 0;
+}
+
+static errno_t
+wl_control_disconnect(kern_ctl_ref kctl, uint32_t unit, void *information)
+{
+	(void)kctl; (void)unit;
+	/* XNU can call this after a failed connect with no unit info. */
+	if (!information) return 0;
+	struct wl_control_client *owner = information;
+	nw_wifi_control_detach(owner->session);
+	IOLockLock(wl_ctl_lock);
+	if (wl_ctl_client == owner) wl_ctl_client = NULL;
+	IOLockUnlock(wl_ctl_lock);
+	IOFree(owner, sizeof(*owner));
+	return 0;
+}
+
+static int
+wl_control_read_mbuf(void *source, void *destination, size_t length)
+{
+	return mbuf_copydata((mbuf_t)source, 0, length, destination);
+}
+
+static errno_t
+wl_control_receive(kern_ctl_ref kctl, uint32_t unit, void *information,
+    mbuf_t packet, int flags)
+{
+	(void)kctl; (void)unit; (void)flags;
+	struct wl_control_client *owner = information;
+	int status = nw_wifi_control_receive(owner->session,
+	    mbuf_pkthdr_len(packet), wl_control_read_mbuf, packet);
+	mbuf_freem(packet);
+	return wl_control_error(status);
+}
+
+static void
+wl_control_rcvd(kern_ctl_ref kctl, uint32_t unit, void *information, int flags)
+{
+	(void)kctl; (void)unit; (void)flags;
+	nw_wifi_control_writable(((struct wl_control_client *)information)->session);
+}
+
+static errno_t
+wl_control_getopt(kern_ctl_ref kctl, uint32_t unit, void *information,
+    int option, void *bytes, size_t *length)
+{
+	(void)kctl; (void)unit;
+	if (option != WL_NW_CONTROL_GET_SESSION) return ENOPROTOOPT;
+	if (!length) return EINVAL;
+	if (!bytes || *length < sizeof(uint64_t)) {
+		*length = sizeof(uint64_t);
+		return EMSGSIZE;
+	}
+	uint64_t session = ((struct wl_control_client *)information)->session;
+	memcpy(bytes, &session, sizeof(session));
+	*length = sizeof(session);
+	return 0;
+}
+
+static int
+wl_control_send(void *context, uint64_t session, const void *bytes, size_t length)
+{
+	(void)context;
+	IOLockLock(wl_ctl_lock);
+	bool active = wl_ctl_client && wl_ctl_client->session == session;
+	uint32_t unit = active ? wl_ctl_client->unit : 0;
+	IOLockUnlock(wl_ctl_lock);
+	if (!active) return NW_CONTROL_SEND_CLOSED;
+	/* Do not hold our lock while the socket layer takes its own. */
+	errno_t result = ctl_enqueuedata(wl_ctl_ref, unit, (void *)bytes, length,
+	    CTL_DATA_EOR);
+	if (!result) return NW_CONTROL_SEND_OK;
+	if (result == ENOBUFS || result == EWOULDBLOCK) return NW_CONTROL_SEND_AGAIN;
+	return NW_CONTROL_SEND_CLOSED;
+}
+
+static void
+wl_control_wake(void *context)
+{
+	(void)context;
+}
+
+static int
+wl_control_start(void)
+{
+	if (wl_ctl_ref) return 0;
+	if (!wl_ctl_lock) wl_ctl_lock = IOLockAlloc();
+	if (!wl_ctl_lock) return ENOMEM;
+	struct kern_ctl_reg registration = {};
+	snprintf(registration.ctl_name, sizeof(registration.ctl_name), "%s",
+	    "org.unixnu.wifi.control");
+	registration.ctl_flags = CTL_FLAG_PRIVILEGED | CTL_FLAG_REG_EXTENDED;
+	registration.ctl_sendsize = 256 * 1024;
+	registration.ctl_recvsize = 512 * 1024;
+	registration.ctl_connect = wl_control_connect;
+	registration.ctl_disconnect = wl_control_disconnect;
+	registration.ctl_send = wl_control_receive;
+	registration.ctl_getopt = wl_control_getopt;
+	registration.ctl_rcvd = wl_control_rcvd;
+	errno_t result = ctl_register(&registration, &wl_ctl_ref);
+	if (result) return result;
+	const struct nw_control_transport transport = {
+		.context = NULL,
+		.send = wl_control_send,
+		.wake = wl_control_wake,
+	};
+	int status = nw_wifi_control_transport_set(&transport);
+	if (status) {
+		ctl_deregister(wl_ctl_ref);
+		wl_ctl_ref = NULL;
+		return wl_control_error(status);
+	}
+	return 0;
+}
+
+static void
+wl_control_stop(void)
+{
+	if (!wl_ctl_ref) return;
+	ctl_deregister(wl_ctl_ref);
+	wl_ctl_ref = NULL;
+}
+
+#else /* !FUXI_WLAN_XNU: the host test has no kernel control socket. */
 static int
 wl_board_control_send(void *context, uint64_t session, const void *bytes, size_t length)
 {
@@ -121,6 +319,18 @@ static const struct nw_control_transport wl_board_control = {
 	.send = wl_board_control_send,
 	.wake = wl_board_control_wake,
 };
+
+static int
+wl_control_start(void)
+{
+	return nw_wifi_control_transport_set(&wl_board_control);
+}
+
+static void
+wl_control_stop(void)
+{
+}
+#endif /* FUXI_WLAN_XNU */
 
 /* ---- host-test injection ----------------------------------------------- */
 
@@ -1052,11 +1262,12 @@ fuxi_wlan_board_start(void)
 	if (!wl_board.cfg_read && wl_board_prepare()) { return 1; }
 	if (!wl_linux_stack) { return 0; }
 	if (wl_linux_started) { return 0; }
-	/* cfg80211's nl80211_init() binds a control channel and turns a missing
-	 * transport into -EBUSY. Install the closed one first; a refusal here is
-	 * not fatal on its own, the start reports the real error below. */
-	if (nw_wifi_control_transport_set(&wl_board_control) != 0) { /* 0 is NW_CONTROL_OK */
-		printf("FUXI WLAN: L1 control transport not installed; bind will report it\n");
+	/* cfg80211's nl80211_init() binds a control channel and refuses to start
+	 * without a transport. Register the kern-control endpoint before the
+	 * stack binds; failure is reported by the stack start below. */
+	int control = wl_control_start();
+	if (control) {
+		printf("FUXI WLAN: L1 control endpoint registration failed: %d\n", control);
 	}
 	wl_linux_start_ms = wl_linux_sample_ms = wl_board_now_ms();
 	wl_linux_starting = true;
@@ -1106,10 +1317,12 @@ fuxi_wlan_board_step(void)
 void
 fuxi_wlan_board_stop(void)
 {
-	if (!wl_linux_started) { return; }
-	wl_linux_started = false;
-	nw_wifi_stop();
-	printf("FUXI WLAN: L1 stack stopped\n");
+	if (wl_linux_started) {
+		wl_linux_started = false;
+		nw_wifi_stop();
+		printf("FUXI WLAN: L1 stack stopped\n");
+	}
+	wl_control_stop();
 }
 
 /* Fault accounting of the endpoint accessors, so a board test can assert that
