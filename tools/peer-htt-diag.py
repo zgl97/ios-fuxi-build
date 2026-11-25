@@ -1,21 +1,34 @@
 #!/usr/bin/env python3
-"""r561 diagnostics: locate the STA-connect 3 s stall.
+"""r562 diagnostics (v2, low-overhead): locate the STA-connect 3 s stall.
 
 The r560 log proves the 3 s block is ath12k_wait_for_peer_created() waiting
 3*HZ for the HTT PEER_MAP event that never arrives.  Two things must be
 separated:
 
   (A) the CE/HTC RX path (which carries BOTH WMI events and HTT t2h messages
-      such as PEER_MAP) stops being serviced after the first scan -- i.e. the
-      host stops pulling completions, or the firmware stops raising the CE
-      interrupt; or
+      such as PEER_MAP) stops being serviced after the first scan; or
   (B) the RX path is alive but the firmware simply never sends PEER_MAP for the
       STA vdev, because the vdev was not started yet (vdev_start_delay=true
       defers ath12k_mac_vdev_start until after peer_create).
 
-Every probe below prints via ath12k_info (kernel log L6) and is rate-limited so
-the log stays readable.  jiffies is appended to every line so the whole trace
-can be ordered against the 3 s sme-connect window.
+v1 of this script ALSO instrumented ce.c and pci.c on a per-message basis and,
+critically, called ath12k_info() from the CE *hard-IRQ* handler.  That floods the
+serial console and (dev_printk in hard-IRQ context) perturbs/hangs the RX and
+control paths -- in two r561 runs wpa_supplicant either never got to authentic-
+ate or hung in init.  v2 therefore leaves ce.c and pci.c completely untouched
+(wmi-op-rx-log.py already keeps a <40-sample trace of CE activity, exactly as in
+the known-good r560 kernel) and keeps only RARE event probes here:
+
+  - peer.c   : peer-create WMI send ret + wait_dp_link_peer ret (a few per auth)
+  - dp_peer.c: dp link peer map event (a few)
+  - dp_htt.c : every HTT t2h PEER_MAP/UNMAP always; other types only first 20
+               then 1-in-1000 as a coarse RX-liveness heartbeat
+  - mac.c    : sta_add entry (is_created/is_started), vdev_start_restart entry,
+               vdev_setup_sync ret (a few)
+
+Every probe prints via ath12k_info (kernel log L6) with jiffies appended so the
+whole trace orders against the 3 s sme-connect window, and the total line count
+for a whole run is tiny (well under the r560 baseline), so timing is unchanged.
 """
 import sys
 import pathlib
@@ -49,18 +62,10 @@ def insert_after_line(text, needle, block, label):
     return "\n".join(lines)
 
 
-def replace_line_span(text, needle, nlines, block, label):
-    lines = text.split("\n")
-    k = _find_line(lines, needle, label)
-    lines[k:k + nlines] = block
-    return "\n".join(lines)
-
-
 def insert_after_line_after(text, marker, needle, block, label):
-    """Like insert_after_line but only searches for `needle` at or after the
-    first occurrence of `marker`.  Needed when `needle` (e.g. `int ret;` or a
-    local decl) is not unique in the file but is unambiguous once we first jump
-    to the target function's signature."""
+    """Insert `block` after `needle`, but only for the occurrence at or after
+    the first occurrence of `marker`.  Needed when `needle` (e.g. `int ret;`)
+    is not unique in the file but is unambiguous inside the target function."""
     mi = text.find(marker)
     if mi < 0:
         raise SystemExit("%s: marker not found: %r" % (label, marker))
@@ -88,60 +93,6 @@ def insert_after_function_brace(text, sig_needle, block, label):
         raise SystemExit("%s: no newline after brace" % label)
     return text[:eol + 1] + "\n".join(block) + "\n" + text[eol + 1:]
 
-
-# ---------------------------------------------------------------- ce.c
-ce = A / "ce.c"
-s = read(ce)
-
-# CE service entry: uncap (was <40) and add jiffies so we can see whether the
-# CE pipes keep being serviced after the first scan.
-s = replace_line_span(s, "nw_ce_service_count[ce_id]++ < 40", 2, [
-    T + "if (ce_id < 16) {",
-    T + T + "unsigned int nw_c = nw_ce_service_count[ce_id]++;",
-    T + T + "if (nw_c <= 80 || (nw_c % 200) == 0)",
-    T + T + T + 'ath12k_info(ab, "ce service %u cnt %u jiffies %lu' + NL + '", ce_id, nw_c, jiffies);',
-    T + "}",
-], "ce service")
-
-# CE rx delivery: uncap (was <40) and add jiffies.
-s = replace_line_span(s, "nw_ce_rx_count[pipe->pipe_num]++ < 40", 2, [
-    T + T + "if (pipe->pipe_num < 16) {",
-    T + T + T + "unsigned int nw_c = nw_ce_rx_count[pipe->pipe_num]++;",
-    T + T + T + "if (nw_c <= 120 || (nw_c % 200) == 0)",
-    T + T + T + T + 'ath12k_info(ab, "ce rx pipe %u len %u cnt %u jiffies %lu' + NL + '", pipe->pipe_num, nbytes, nw_c, jiffies);',
-    T + T + "}",
-], "ce rx")
-
-# RX replenish retry: fires only when posting new rx buffers fails (-ENOMEM
-# etc).  If this keeps firing, the RX ring is starving.
-s = insert_after_line(s, "timer_container_of(ab, t, rx_replenish_retry)", [
-    T + '{ static unsigned int nw_rr; if (nw_rr++ < 200) ath12k_info(ab, "NWDIAG ce replenish retry cnt %u jiffies %lu' + NL + '", nw_rr, jiffies); }',
-], "ce replenish retry")
-
-write(ce, s)
-
-# ---------------------------------------------------------------- pci.c
-pci = A / "pci.c"
-s = read(pci)
-
-# CE workqueue: entry point (did the queued work run?) ...
-s = insert_after_line(s, "static void ath12k_pci_ce_workqueue(struct work_struct *work)", [], "ce wq marker")  # no-op guard
-s = insert_after_line(s, "int irq_idx = ATH12K_PCI_IRQ_CE0_OFFSET + ce_pipe->pipe_num;", [
-    T + '{ static unsigned int nw_wq; if (nw_wq++ < 200) ath12k_info(ce_pipe->ab, "NWDIAG ce wq enter pipe %d jiffies %lu' + NL + '", ce_pipe->pipe_num, jiffies); }',
-], "ce wq enter")
-# ... and exit (did per_engine_service return, i.e. not hang?).
-s = insert_after_line(s, "ath12k_ce_per_engine_service(ce_pipe->ab, ce_pipe->pipe_num);", [
-    T + '{ static unsigned int nw_wqd; if (nw_wqd++ < 200) ath12k_info(ce_pipe->ab, "NWDIAG ce wq done pipe %d jiffies %lu' + NL + '", ce_pipe->pipe_num, jiffies); }',
-], "ce wq done")
-
-# CE hard-IRQ handler: does the firmware keep raising the CE interrupt?
-s = replace_line_span(s, "if (!test_bit(ATH12K_FLAG_CE_IRQ_ENABLED, &ab->dev_flags))", 2, [
-    T + "if (!test_bit(ATH12K_FLAG_CE_IRQ_ENABLED, &ab->dev_flags))",
-    T + T + "return IRQ_HANDLED;",
-    T + '{ static unsigned int nw_irq; if (nw_irq++ < 400) ath12k_info(ab, "NWDIAG ce irq pipe %d jiffies %lu' + NL + '", ce_pipe->pipe_num, jiffies); }',
-], "ce irq")
-
-write(pci, s)
 
 # ---------------------------------------------------------------- peer.c
 peer = A / "peer.c"
@@ -176,7 +127,8 @@ write(dppeer, s)
 dphtt = A / "dp_htt.c"
 s = read(dphtt)
 
-# Every HTT t2h message: PEER_MAP* always logged; other types rate-limited.
+# Every HTT t2h message: PEER_MAP*/UNMAP* always logged; other types only the
+# first 20 then 1-in-1000, as a coarse (cheap) RX-liveness heartbeat.
 s = insert_after_line(s, "type = le32_get_bits(resp->version_msg.version, HTT_T2H_MSG_TYPE);", [
     T + "{",
     T + T + "static unsigned int nw_t2h;",
@@ -187,7 +139,7 @@ s = insert_after_line(s, "type = le32_get_bits(resp->version_msg.version, HTT_T2
     T + T + "    type == HTT_T2H_MSG_TYPE_PEER_UNMAP ||",
     T + T + "    type == HTT_T2H_MSG_TYPE_PEER_UNMAP2)",
     T + T + T + 'ath12k_info(ab, "NWDIAG htt t2h PEER type 0x%x len %d total %u jiffies %lu' + NL + '", type, skb->len, nw_t2h, jiffies);',
-    T + T + "else if (nw_t2h <= 500 || (nw_t2h % 200) == 0)",
+    T + T + "else if (nw_t2h <= 20 || (nw_t2h % 1000) == 0)",
     T + T + T + 'ath12k_info(ab, "NWDIAG htt t2h type 0x%x total %u jiffies %lu' + NL + '", type, nw_t2h, jiffies);',
     T + "}",
 ], "htt t2h")
@@ -221,4 +173,4 @@ s = insert_after_line_after(s, VR_SIG, "ret = ath12k_mac_vdev_setup_sync(ar);", 
 
 write(mac, s)
 
-print("peer-htt-diag: patched ce/pci/peer/dp_peer/dp_htt/mac")
+print("peer-htt-diag(v2): patched peer/dp_peer/dp_htt/mac (ce.c/pci.c untouched)")
