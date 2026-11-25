@@ -109,6 +109,12 @@ python3 "$root/tools/reg-chan-list-fallback.py" "$DEST"
 python3 "$root/tools/idle-ps-off.py" "$DEST"
 python3 "$root/tools/chan-list-2g-only.py" "$DEST"
 python3 "$root/tools/nw-scan-stuck-diag.py" "$DEST"
+# r561: instrument the STA-connect 3 s stall (ath12k_wait_for_peer_created waits
+# 3*HZ for the HTT PEER_MAP that never arrives). Probes CE/HTC RX liveness
+# (ce irq / ce wq / ce service / ce rx pipe / replenish retry), every HTT t2h
+# type incl PEER_MAP, peer create send/wait, dp link peer map, and mac station_add
+# / vdev_start (is_created/is_started, setup_sync ret). See HANDOFF §30.7.
+python3 "$root/tools/peer-htt-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
