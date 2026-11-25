@@ -115,6 +115,13 @@ python3 "$root/tools/nw-scan-stuck-diag.py" "$DEST"
 # type incl PEER_MAP, peer create send/wait, dp link peer map, and mac station_add
 # / vdev_start (is_created/is_started, setup_sync ret). See HANDOFF §30.7.
 python3 "$root/tools/peer-htt-diag.py" "$DEST"
+# r563: break the STA start-order deadlock. r562 NWDIAG showed sta_add
+# created=1 started=0, peer create TX ok, wait_event_timeout(PEER_MAP)=0 (no
+# HTT PEER_MAP, no dppeer map): with vdev_start_delay=true the STA vdev is
+# never started before peer_create, so the firmware never maps the peer. Flip
+# wcn7850 hw2.0 vdev_start_delay to false so assign_vif_chanctx starts the vdev
+# first. qcc2072's identical line is left untouched.
+python3 "$root/tools/vdev-start-delay-off.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
