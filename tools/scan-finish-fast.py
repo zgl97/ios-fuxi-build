@@ -13,10 +13,17 @@ Two facts from the r566 boot log:
 
 The first scan therefore only has to collect beacons; there is no point in
 waiting 20 s for a completion event that this firmware never sends.  This
-patch caps max_scan_time at 8 s (r569: 1.5 s aborted the 13-channel passive
-scan before COMPLETED arrived), makes ath12k_scan_stop() skip the WMI
+patch caps max_scan_time at 1.5 s, makes ath12k_scan_stop() skip the WMI
 cancel command and its 3 s wait, and keeps the scan vdev instead of
 deleting it during scan cleanup.
+
+r572: back to 1.5 s (r569 had raised it to 8 s).  The firmware does not
+complete the scan on its own: it only emits COMPLETED once the scan-duration
+cap expires, and the WMI receive side dies about 1.4 s into the scan (both
+r567 and r571 go silent after the sixth channel).  With an 8 s cap the
+completion never arrives, the vdev stays busy scanning, and every later
+vdev start times out at -110.  r567 reached HTT PEER_MAP with 1.5 s because
+COMPLETED beat the stall.
 """
 import pathlib
 import sys
@@ -38,8 +45,8 @@ def replace(path, old, new, label):
 wmi = ath / "wmi.c"
 replace(wmi,
         "\targ->max_scan_time = 20000;",
-        "\targ->max_scan_time = 8000;",
-        "max_scan_time 20000 -> 8000")
+        "\targ->max_scan_time = 1500;",
+        "max_scan_time 20000 -> 1500")
 
 mac = ath / "mac.c"
 replace(mac,
