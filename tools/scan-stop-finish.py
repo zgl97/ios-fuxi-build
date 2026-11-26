@@ -29,6 +29,14 @@ new = ('\tath12k_info(ar->ab, "NWDIAG scan_stop ok pdev %u\\n",\n'
        '\tret = 0;\n'
        '\tath12k_info(ar->ab, "NWDIAG scan_finish local state %d\\n",\n'
        '\t\t   ar->scan.state);\n'
+       '\t/* r580: report this as a normal completion.  ath12k_scan_abort()\n'
+       '\t * set ABORTING just above, and ath12k_scan_vdev_clean_work()\n'
+       '\t * derives cfg80211_scan_info.aborted from that state; with\n'
+       '\t * aborted=true wpa_supplicant logs "Scan was aborted - do not use\n'
+       '\t * the incomplete scan results" and never starts association.\n'
+       '\t */\n'
+       '\tif (ar->scan.state == ATH12K_SCAN_ABORTING)\n'
+       '\t\tar->scan.state = ATH12K_SCAN_RUNNING;\n'
        '\tath12k_mac_scan_finish(ar);\n')
 
 if text.count(old) != 1:
