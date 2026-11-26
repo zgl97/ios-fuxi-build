@@ -151,6 +151,14 @@ python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # scan events so COMPLETED/DEQUEUED is visible.
 python3 "$root/tools/reg-scan-chan-list-guard.py" "$DEST"
 python3 "$root/tools/scan-event-log.py" "$DEST"
+# r575: r574 booted, wpa's INFO timed out three times, and every "Remove
+# interface en0 from radio" killed the scan that was already running on vdev 0:
+# the firmware's WMI_SCAN_EVENT_COMPLETED then arrived for a vdev that no
+# longer had an interface, ath12k_scan_event() could not resolve the radio and
+# dropped the event, so the BSS cache stayed empty and wpa reported "No
+# suitable network found" forever.  Attribute such events to the single active
+# radio instead of dropping them.
+python3 "$root/tools/scan-event-fallback.py" "$DEST"
 # r567: this firmware never sends WMI_SCAN_EVENT_COMPLETED for the first scan,
 # so cap max_scan_time at 8 s, skip the always-timing-out WMI scan-stop, and
 # keep the scan vdev (it is the primary interface's link-0 vdev the station
@@ -172,6 +180,11 @@ python3 "$root/tools/mgmt-tx-diag.py" "$DEST"
 # PDEV_SET_PARAM).  Give WMI_VDEV_START 15 s and print the elapsed wait plus
 # the response event, so one boot log separates "slow" from "wedged".
 python3 "$root/tools/vdev-setup-timeout.py" "$DEST"
+# r575: keep the interface alive when the board-path scan makes the first
+# NW_CONTROL_INFO time out (that failure is what cascaded into r574), and stamp
+# both vdev teardown paths so the console shows when vdev 0 disappears.
+python3 "$root/tools/sheng-info-retry.py" "$DEST"
+python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
