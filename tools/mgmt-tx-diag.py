@@ -154,19 +154,12 @@ replace(
     "wmi.c svc bits",
 )
 
-# --- ce.c: widen the CE3 (WMI) and CE4 (HTT) tx-completion sampling ----------
-replace(
-    ce,
-    """\t\tif (pipe->pipe_num < 16 && nw_ce_tx_count[pipe->pipe_num]++ < 12)
-\t\t\tath12k_info(ab, "ce tx done pipe %u len %u\\n", pipe->pipe_num, skb->len);
-""",
-    """\t\tif (pipe->pipe_num < 16 &&
-\t\t    nw_ce_tx_count[pipe->pipe_num]++ <
-\t\t\t    (pipe->pipe_num == 3 || pipe->pipe_num == 4 ? 240 : 12))
-\t\t\tath12k_info(ab, "ce tx done pipe %u len %u jiffies %lu\\n",
-\t\t\t\t    pipe->pipe_num, skb->len, jiffies);
-""",
-    "ce.c tx cap",
-)
+# --- ce.c: deliberately left at the wmi-op-rx-log.py sampling of 12 ----------
+# r568 raised the CE3/CE4 tx-completion cap to 240. That prints from the CE
+# completion path, i.e. the hottest spot in the RX/TX machinery, and the console
+# flooding broke the scan/auth timing that r567 had working (r567 reached HTT
+# PEER_MAP; r568-r570 did not). r571 restores the modest cap so the run matches
+# the r567 timing; the rare mgmt-tx probes above still fire once per frame.
+_ = ce  # kept for reference; ce.c is intentionally not rewritten
 
-print("mgmt-tx-diag: patched hw.c/mac.c/wmi.c/ce.c")
+print("mgmt-tx-diag: patched hw.c/mac.c/wmi.c (ce.c untouched)")

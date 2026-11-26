@@ -10,6 +10,13 @@ cleanly while still giving its reuse path a populated BSS cache.
 r566: the device wpa_supplicant still uses the board-scan reuse path, so the
 kernel must supply the scan results.  Wait long enough for wpa to settle, then
 run the same single 2.4 GHz passive scan the board path always used.
+
+r571: back to a fixed delay.  The r570 gate polled nw_cfg80211_client_ready(),
+but that predicate never became true (a GET_BSS counter that also counted
+failing sessions, and an INFO timestamp that was never assigned), so the loop
+always ran out and the scan fired a full minute after boot - straight into
+wpa's authentication attempt, which then blocked on a vdev that was still
+scanning.  r567 reached HTT PEER_MAP with this fixed delay, so use it again.
 """
 import pathlib
 import sys
@@ -30,15 +37,10 @@ old = """  nw_wifi_stats.stage = 4;
   }
 """
 new = """  nw_wifi_stats.stage = 4;
-  /* r570: wait until wpa_supplicant has completed an INFO exchange and kept
-   * the control socket open.  A scan started while a failing instance tears
-   * the interface down is aborted by ath12k_mac_op_unassign_vif_chanctx. */
-  for (int waited = 0; waited < 300; waited++) {
-    extern int nw_cfg80211_client_ready(void);
-    if (nw_cfg80211_client_ready()) break;
-    lx_delay_ms(200);
-  }
-  lx_delay_ms(500);
+  /* Let wpa_supplicant initialize and start its scan cycle before the board
+   * path takes the interface locks.  Running this scan earlier makes wpa's
+   * INFO request time out and wedges the firmware. */
+  lx_delay_ms(12000);
   {
     extern int nw_cfg80211_scan_all(void);
     int scanned = nw_cfg80211_scan_all();

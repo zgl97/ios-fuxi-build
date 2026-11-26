@@ -135,11 +135,16 @@ python3 "$root/tools/vdev-start-delay-off.py" "$DEST"
 # skipping it entirely, but the device wpa binary still uses the board-scan
 # reuse path and never scans on its own.  r566 delays the same single 2.4 GHz
 # passive scan until wpa has initialized, then the board scan fills the BSS
-# cache its reuse path reads.  r570 waits for a completed INFO exchange on a
-# still-open control socket instead of a fixed delay, because a failing wpa
-# instance aborts the scan when it tears the interface down.
+# cache its reuse path reads.  r570 tried to gate on a "ready control client"
+# instead of a fixed delay, but that predicate never turned true and the scan
+# landed a minute late, on top of wpa's authentication attempt.  r571 goes back
+# to the fixed 12 s delay that r567 used to reach HTT PEER_MAP.
 python3 "$root/tools/defer-first-scan.py" "$DEST"
-python3 "$root/tools/scan-after-client.py" "$DEST"
+# r571: scan-after-client.py is unhooked - its gate is what broke r570.  If the
+# gating idea comes back, fix nw_cfg80211_client_ready() first (assign
+# last_info_jiffies on a successful INFO, and only count GET_BSS batches of a
+# session that already exchanged INFO); otherwise the poll always expires.
+# python3 "$root/tools/scan-after-client.py" "$DEST"
 python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # r565: keep a late regulatory update from rewriting WMI_SCAN_CHAN_LIST while
 # the first scan is starting (the second list command cancels it), and log all
@@ -156,8 +161,10 @@ python3 "$root/tools/scan-finish-fast.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
 # r570: log which kernel path aborts the one scan the firmware will complete.
 python3 "$root/tools/scan-abort-diag.py" "$DEST"
-# r568: follow an authentication frame from mac80211 into WMI/CE3 and widen
-# the CE3/CE4 tx-completion sampling.
+# r568: follow an authentication frame from mac80211 into WMI/CE3.  The probes
+# are rare (one line per frame), so they stay; the CE3/CE4 tx-completion cap
+# widening that came with them is gone (r571) - it printed from the CE
+# completion path and broke the r567 scan/auth timing.
 python3 "$root/tools/mgmt-tx-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
