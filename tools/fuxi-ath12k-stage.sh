@@ -140,6 +140,7 @@ python3 "$root/tools/vdev-start-delay-off.py" "$DEST"
 # landed a minute late, on top of wpa's authentication attempt.  r571 goes back
 # to the fixed 12 s delay that r567 used to reach HTT PEER_MAP.
 python3 "$root/tools/defer-first-scan.py" "$DEST"
+python3 "$root/tools/no-board-scan.py" "$DEST"
 # r571: scan-after-client.py is unhooked - its gate is what broke r570.  If the
 # gating idea comes back, fix nw_cfg80211_client_ready() first (assign
 # last_info_jiffies on a successful INFO, and only count GET_BSS batches of a
@@ -166,6 +167,7 @@ python3 "$root/tools/scan-event-fallback.py" "$DEST"
 # BSS cache while the scan is still running: it would otherwise authenticate
 # before the vdev is free and every vdev-start would time out.
 python3 "$root/tools/scan-finish-fast.py" "$DEST"
+python3 "$root/tools/scan-stop-ok.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
 # r570: log which kernel path aborts the one scan the firmware will complete.
 python3 "$root/tools/scan-abort-diag.py" "$DEST"
