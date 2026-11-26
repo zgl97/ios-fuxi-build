@@ -269,6 +269,9 @@ kernel() {
     python3 tools/sync-fuxi-audio.py --check
     python3 tools/test-fuxi-pac.py
     python3 tools/sync-fuxi-pac.py --check
+    # 0103 is generated from xnu/fuxi-h1/*; a stale overlay still builds, and the
+    # missing code only shows up on the phone (r581 shipped without fuxireset).
+    python3 tools/sync-fuxi-h1.py --check
     python3 tools/test-fuxi-arm64e.py
     if [[ $target == kernel-wlan6g ]]; then
         # WLAN source keeps the existing artifact/target and cmdlines. Exercise the
