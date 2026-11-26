@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Give the firmware the whole channel list's worth of time (r579).
+"""Keep max_scan_time at the value this firmware actually completes (r581).
 
-`scan-finish-fast.py` capped max_scan_time at 1.5 s so the board scan would
-return quickly.  r578 showed why that cap is now fatal: the STA scan reached
-channel 3 (2422) after ~1.05 s, the 1.5 s cap plus the 200 ms margin in
-ath12k_mac_hw_scan() fired ath12k_scan_timeout_work() first, and the scan was
-aborted before the firmware ever emitted WMI_SCAN_EVENT_COMPLETED.
+`scan-finish-fast.py` caps max_scan_time at 1.5 s.  r578 showed that a widened
+window (8 s, r579) makes things worse: the firmware emits four channel events
+and then neither completes the scan nor answers WMI_VDEV_START, so the whole
+association path stalls (r580: `vdev_start setup_sync ... ret -110` twice).
 
-Widen it back to 8 s so the passive 13-channel walk finishes and the firmware
-reports completion on its own.  Run after scan-finish-fast.py.
+With 1.5 s, the firmware finishes the walk (r567: six channel events and a real
+WMI_SCAN_EVENT_COMPLETED) because its own scan timeout is what ends it.  Keep
+that value, and rely on scan-stop-finish.py only for the abort path.
+
+Run after scan-finish-fast.py.
 """
 import pathlib
 import sys
@@ -18,11 +20,8 @@ wmi = root / "deps/linux/drivers/net/wireless/ath/ath12k/wmi.c"
 
 text = wmi.read_text()
 old = "\targ->max_scan_time = 1500;"
-new = "\targ->max_scan_time = 8000;"
-
 if text.count(old) != 1:
     raise SystemExit("scan-time-wide: expected exactly one max_scan_time cap, found %d"
                      % text.count(old))
 
-wmi.write_text(text.replace(old, new, 1), encoding="utf-8")
-print("patched wmi.c: max_scan_time 1500 -> 8000")
+print("scan-time-wide: max_scan_time stays at 1500 ms (firmware-completed scan)")

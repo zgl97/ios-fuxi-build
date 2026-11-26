@@ -92,6 +92,7 @@ static struct fuxi_key_arbiter fk_arb;        /* fk_hid_lock */
 static uint64_t fk_tap_last;                  /* fk_hid_lock */
 static thread_call_t fk_inject_call;
 static int fk_inject_chan;
+static int fk_reset_chan;
 
 static uint64_t
 fk_ms(uint64_t abs)
@@ -839,6 +840,39 @@ fk_autolock(void *arg, wait_result_t wr)
 	}
 }
 
+/* Unattended test loops: the device hangs in XNU after a run, and only a
+ * physical power cycle brings it back, which is impossible when the bench is
+ * driven remotely. fuxireset=SECONDS arms a PSCI SYSTEM_RESET, so every run
+ * can hand the phone back to Android (and to adb/fastboot) by itself.
+ * Qualcomm's TF-A implements PSCI over the SMC conduit, which is the same
+ * conduit the GPU/SCM calls in this port already use. */
+static void
+fk_psci_reset(void)
+{
+	register uint64_t x0 __asm__("x0") = 0x84000009ULL;   /* SYSTEM_RESET */
+	register uint64_t x1 __asm__("x1") = 0;
+	register uint64_t x2 __asm__("x2") = 0;
+	register uint64_t x3 __asm__("x3") = 0;
+	__asm__ volatile("smc #0" : "+r"(x0) : "r"(x1), "r"(x2), "r"(x3) : "memory");
+}
+
+static void
+fk_reset_thread(void *arg, wait_result_t wr)
+{
+	unsigned secs = (unsigned)(uintptr_t)arg;
+	uint64_t deadline;
+	printf("FUXI RESET: PSCI SYSTEM_RESET armed for %u s\n", secs);
+	clock_interval_to_deadline((uint64_t)secs, NSEC_PER_SEC, &deadline);
+	(void)assert_wait_deadline(&fk_reset_chan, THREAD_UNINT, deadline);
+	thread_block(THREAD_CONTINUE_NULL);
+	printf("FUXI RESET: firing PSCI SYSTEM_RESET\n");
+	fk_psci_reset();
+	printf("FUXI RESET: smc returned; falling back to wfi\n");
+	for (;;) {
+		__asm__ volatile("wfi");
+	}
+}
+
 void
 fuxi_keys_init(void)
 {
@@ -857,6 +891,15 @@ fuxi_keys_init(void)
 		thread_deallocate(thread);
 	} else {
 		printf("FUXI KEYS: kernel_thread_start failed\n");
+	}
+	unsigned reset_after = 0;
+	if (PE_parse_boot_argn("fuxireset", &reset_after, sizeof(reset_after)) &&
+	    reset_after > 0 && reset_after < 86400) {
+		if (kernel_thread_start(fk_reset_thread, (void *)(uintptr_t)reset_after, &thread) == KERN_SUCCESS) {
+			thread_deallocate(thread);
+		} else {
+			printf("FUXI RESET: thread_start failed\n");
+		}
 	}
 	unsigned autolock = 0;
 	if (PE_parse_boot_argn("fuxiautolock", &autolock, sizeof(autolock)) && autolock >= 10 && autolock <= 3600) {
