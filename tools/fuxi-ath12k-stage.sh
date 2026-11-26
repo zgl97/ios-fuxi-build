@@ -166,6 +166,12 @@ python3 "$root/tools/scan-abort-diag.py" "$DEST"
 # widening that came with them is gone (r571) - it printed from the CE
 # completion path and broke the r567 scan/auth timing.
 python3 "$root/tools/mgmt-tx-diag.py" "$DEST"
+# r574: r573 booted the byte-identical r567 payload and still timed out in
+# ath12k_mac_vdev_setup_sync() (four times, -110 after exactly 5000 jiffies)
+# while the firmware was mid-scan, then the WMI queue filled up (-105 on every
+# PDEV_SET_PARAM).  Give WMI_VDEV_START 15 s and print the elapsed wait plus
+# the response event, so one boot log separates "slow" from "wedged".
+python3 "$root/tools/vdev-setup-timeout.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
