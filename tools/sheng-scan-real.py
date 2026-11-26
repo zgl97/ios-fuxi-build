@@ -33,9 +33,11 @@ old = """  os_memset(ssids, 0, sizeof(ssids));
   driver->join_frequency = 0;
 """
 new = """  os_memset(ssids, 0, sizeof(ssids));
-  /* Passive wildcard: an empty SSID list makes cfg80211 request a passive
-   * scan, which this firmware completes. */
-  size_t ssid_count = 0;
+  /* Wildcard SSID (zero length) instead of an empty list: cfg80211 then asks
+   * for an active scan, so every channel gets probe requests.  A passive
+   * 1.5 s walk completes on this firmware but catches almost no beacons
+   * (r581: a real WMI_SCAN_EVENT_COMPLETED and still zero BSS). */
+  size_t ssid_count = 1;
   /* Always submit the board's 13-channel 2.4 GHz set: a one-channel hint (or
    * the all-band list) leaves the scan in STARTING until it times out. */
   (void)parameters->freqs;

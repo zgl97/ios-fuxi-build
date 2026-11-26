@@ -37,6 +37,11 @@ new = ('\tath12k_info(ar->ab, "NWDIAG scan_stop ok pdev %u\\n",\n'
        '\t */\n'
        '\tif (ar->scan.state == ATH12K_SCAN_ABORTING)\n'
        '\t\tar->scan.state = ATH12K_SCAN_RUNNING;\n'
+       '\t/* r583: release the firmware scan engine too.  Without a\n'
+       '\t * WMI_SCAN_STOP the engine stays busy: only four channel events\n'
+       '\t * ever arrive and the next WMI_VDEV_START is never answered.\n'
+       '\t */\n'
+       '\t(void)ath12k_wmi_send_scan_stop_cmd(ar, &arg);\n'
        '\tath12k_mac_scan_finish(ar);\n')
 
 if text.count(old) != 1:

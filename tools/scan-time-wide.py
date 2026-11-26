@@ -20,8 +20,10 @@ wmi = root / "deps/linux/drivers/net/wireless/ath/ath12k/wmi.c"
 
 text = wmi.read_text()
 old = "\targ->max_scan_time = 1500;"
+new = "\targ->max_scan_time = 8000;"
 if text.count(old) != 1:
     raise SystemExit("scan-time-wide: expected exactly one max_scan_time cap, found %d"
                      % text.count(old))
 
-print("scan-time-wide: max_scan_time stays at 1500 ms (firmware-completed scan)")
+wmi.write_text(text.replace(old, new, 1), encoding="utf-8")
+print("scan-time-wide: max_scan_time raised to 8000 ms (13-channel walk)")
