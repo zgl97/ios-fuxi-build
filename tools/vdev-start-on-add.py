@@ -71,7 +71,7 @@ START = """	/* r590: create and start the STA vdev right here, on channel 1, bef
 				arvif->ar = ar;
 		}
 
-		start_chan = ieee80211_get_channel(hw->wiphy, 2412);
+		start_chan = ieee80211_get_channel(hw->wiphy, 2417);
 		if (arvif->ar && start_chan) {
 			cfg80211_chandef_create(&start_ctx.def, start_chan,
 						NL80211_CHAN_HT20);

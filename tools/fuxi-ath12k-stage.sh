@@ -205,6 +205,10 @@ python3 "$root/tools/vdev-start-cmd-diag.py" "$DEST"
 python3 "$root/tools/mgmt-rx-log.py" "$DEST"
 python3 "$root/tools/mgmt-tx-liveness-diag.py" "$DEST"
 python3 "$root/tools/mgmt-tx-align.py" "$DEST"
+# r605: the station vdev is started before mac80211 knows the AP, so the frame
+# and the vdev could disagree on the channel while chanfreq stayed 0.  Report
+# the bound channel and hand it to the firmware.
+python3 "$root/tools/mgmt-tx-freq.py" "$DEST"
 # r602: r601 aligns the frame and shows a well-formed auth header, yet the
 # firmware neither transmits nor complains.  Print the vdev/chanctx state the
 # command is judged against and give chanfreq the vdev's channel instead of 0.
