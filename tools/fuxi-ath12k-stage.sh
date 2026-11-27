@@ -230,6 +230,18 @@ python3 "$root/tools/mgmt-tx-dp-allow.py" "$DEST"
 # Print the wbm release ring on every completion pass so an empty ring (firmware
 # never consumed the tcl entry) is distinguishable from a drop reason.
 python3 "$root/tools/dp-tx-compl-log.py" "$DEST"
+# r610: r609 shows the firmware consumed the tcl entry and released it as
+# FRAME_ACKED, yet the ap still answers nothing and no auth response reaches
+# the host.  Print the 802.11 header of the frame right before it is queued
+# -- addr2 must be the mac the firmware registered for this vdev, or the
+# ap's unicast reply is dropped by the rx address filter -- and give the
+# mgmt rx line the same fields so a reply is unmistakable.  The ring print is
+# throttled: head 1 / tail 0 is the empty-ring state (the loop tests
+# ATH12K_TX_COMPL_NEXT(head) != tail), so printing it every pass only
+# perturbs the tx hot path.
+python3 "$root/tools/mgmt-auth-hdr-log.py" "$DEST"
+python3 "$root/tools/mgmt-rx-hdr-log.py" "$DEST"
+python3 "$root/tools/dp-tx-ring-throttle.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
