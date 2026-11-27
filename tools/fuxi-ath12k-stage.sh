@@ -209,6 +209,11 @@ python3 "$root/tools/control-request-log.py" "$DEST"
 # Stamp prep_connection/sta_info_insert/ieee80211_auth so the blocking driver
 # callback names itself.
 python3 "$root/tools/auth-path-log.py" "$DEST"
+# r596: r595 prints `mac auth prep begin` and the vdev_start that
+# drv_assign_vif_chanctx() issues (ret 0), then nothing - no notify, no
+# ieee80211_auth, no mgmt frame.  Bracket every step after the assign so the
+# callback or recalc that never returns names itself.
+python3 "$root/tools/chanctx-path-log.py" "$DEST"
 # r593: op 1 is INFO, so r592's trace means the second client wedges inside its
 # first INFO (dev_open under rtnl_lock, then the handler under the wiphy lock).
 # Stamp the stages so the log shows whether dev_open or the handler blocks.
