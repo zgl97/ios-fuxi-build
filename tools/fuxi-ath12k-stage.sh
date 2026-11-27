@@ -248,6 +248,11 @@ python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 # from a rejected command.
 python3 "$root/tools/dma-cache-clean.py" "$DEST"
 python3 "$root/tools/mgmt-tx-cmdbuf.py" "$DEST"
+# r604: the r603 dump shows the MGMT_TX_SEND header claiming a 32-byte command
+# while the frame TLV actually starts at 36, so the firmware reads an empty
+# frame array and drops it without an error.  Take the length from the address
+# the frame TLV really has, and print sizeof/offsetof to expose the layout.
+python3 "$root/tools/mgmt-tx-tlv-len.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
