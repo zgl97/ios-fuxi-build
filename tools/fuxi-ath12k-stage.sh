@@ -203,6 +203,12 @@ python3 "$root/tools/mgmt-rx-log.py" "$DEST"
 # timeouts (errno 60).  Log every control request/result plus the session
 # open/close paths so the handler that wedges the worker names itself.
 python3 "$root/tools/control-request-log.py" "$DEST"
+# r595: r594 reaches mac80211 authentication and then goes quiet - no
+# `op_tx mgmt`, no `wmi mgmt send`, and the NW_CONTROL_AUTHENTICATE request
+# never returns, so wpa_supplicant times out after 3 s and removes en0.
+# Stamp prep_connection/sta_info_insert/ieee80211_auth so the blocking driver
+# callback names itself.
+python3 "$root/tools/auth-path-log.py" "$DEST"
 # r593: op 1 is INFO, so r592's trace means the second client wedges inside its
 # first INFO (dev_open under rtnl_lock, then the handler under the wiphy lock).
 # Stamp the stages so the log shows whether dev_open or the handler blocks.
