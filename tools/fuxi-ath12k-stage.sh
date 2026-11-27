@@ -217,6 +217,11 @@ python3 "$root/tools/mgmt-tx-bss-chan.py" "$DEST"
 # firmware neither transmits nor complains.  Print the vdev/chanctx state the
 # command is judged against and give chanfreq the vdev's channel instead of 0.
 python3 "$root/tools/mgmt-tx-state-diag.py" "$DEST"
+# r607: the AUTH frame leaves the host as WMI_MGMT_TX_SEND_CMDID (ret 0) and
+# the firmware never answers -- no completion event, nothing on air.  Frame,
+# alignment, vdev state, channel and TLV header are all ruled out, so hand the
+# frame to the DP/TCL path (NATIVE_WIFI encap) whose peer is already in the AST.
+python3 "$root/tools/mgmt-tx-via-dp.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
