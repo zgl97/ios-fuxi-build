@@ -170,6 +170,7 @@ python3 "$root/tools/scan-finish-fast.py" "$DEST"
 python3 "$root/tools/scan-stop-ok.py" "$DEST"
 python3 "$root/tools/scan-stop-finish.py" "$DEST"
 python3 "$root/tools/scan-time-wide.py" "$DEST"
+python3 "$root/tools/scan-dwell.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
 # r570: log which kernel path aborts the one scan the firmware will complete.
 python3 "$root/tools/scan-abort-diag.py" "$DEST"
