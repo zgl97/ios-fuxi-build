@@ -172,6 +172,9 @@ python3 "$root/tools/scan-stop-finish.py" "$DEST"
 python3 "$root/tools/scan-time-wide.py" "$DEST"
 python3 "$root/tools/scan-dwell.py" "$DEST"
 python3 "$root/tools/scan-result-gate.py" "$DEST"
+# r589: open that gate when the scan ends instead of three seconds after it
+# starts, so a 1.5 s firmware-completed scan still hands its BSS list to wpa.
+python3 "$root/tools/scan-gate-on-done.py" "$DEST"
 # r570: log which kernel path aborts the one scan the firmware will complete.
 python3 "$root/tools/scan-abort-diag.py" "$DEST"
 # r568: follow an authentication frame from mac80211 into WMI/CE3.  The probes
