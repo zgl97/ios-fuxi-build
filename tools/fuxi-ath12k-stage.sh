@@ -220,6 +220,11 @@ python3 "$root/tools/auth-path-log.py" "$DEST"
 # ieee80211_auth, no mgmt frame.  Bracket every step after the assign so the
 # callback or recalc that never returns names itself.
 python3 "$root/tools/chanctx-path-log.py" "$DEST"
+# r599: with the channel finally assigned (chan assign done 0), the next stamp
+# is bss_info changed 0x40000 = BSS_CHANGED_TXPOWER and it never returns:
+# ath12k_mac_txpower_recalc() -> ath12k_wmi_pdev_set_param() blocks on the
+# saturated WMI path, so mac80211 never builds the authentication frame.
+python3 "$root/tools/bss-info-skip-txpower.py" "$DEST"
 # r593: op 1 is INFO, so r592's trace means the second client wedges inside its
 # first INFO (dev_open under rtnl_lock, then the handler under the wiphy lock).
 # Stamp the stages so the log shows whether dev_open or the handler blocks.
