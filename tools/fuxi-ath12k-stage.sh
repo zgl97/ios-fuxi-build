@@ -204,6 +204,7 @@ python3 "$root/tools/vdev-setup-timeout.py" "$DEST"
 python3 "$root/tools/vdev-start-cmd-diag.py" "$DEST"
 python3 "$root/tools/mgmt-rx-log.py" "$DEST"
 python3 "$root/tools/mgmt-tx-liveness-diag.py" "$DEST"
+python3 "$root/tools/mgmt-tx-align.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
