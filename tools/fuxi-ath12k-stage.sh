@@ -187,6 +187,7 @@ python3 "$root/tools/vdev-setup-timeout.py" "$DEST"
 # r575: keep the interface alive when the board-path scan makes the first
 # NW_CONTROL_INFO time out (that failure is what cascaded into r574), and stamp
 # both vdev teardown paths so the console shows when vdev 0 disappears.
+python3 "$root/tools/vdev-start-cmd-diag.py" "$DEST"
 python3 "$root/tools/sheng-info-retry.py" "$DEST"
 python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
