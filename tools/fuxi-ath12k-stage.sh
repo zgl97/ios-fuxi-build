@@ -151,6 +151,10 @@ python3 "$root/tools/sheng-scan-real.py" "$DEST"
 # the first scan is starting (the second list command cancels it), and log all
 # scan events so COMPLETED/DEQUEUED is visible.
 python3 "$root/tools/reg-scan-chan-list-guard.py" "$DEST"
+# r590: bring the station vdev up at interface-add time, before any scan, so
+# the first WMI_VDEV_START lands on a live vdev instead of the one the scan
+# just tore down (that unanswered command jammed every later WMI command).
+python3 "$root/tools/vdev-start-on-add.py" "$DEST"
 python3 "$root/tools/scan-event-log.py" "$DEST"
 # r575: r574 booted, wpa's INFO timed out three times, and every "Remove
 # interface en0 from radio" killed the scan that was already running on vdev 0:
