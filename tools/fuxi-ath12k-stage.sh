@@ -226,6 +226,10 @@ python3 "$root/tools/mgmt-tx-via-dp.py" "$DEST"
 # r607 hit.  Management frames travel as raw 802.11 inside NATIVE_WIFI encap,
 # and the ap peer is already in the AST, so allow them through.
 python3 "$root/tools/mgmt-tx-dp-allow.py" "$DEST"
+# r609: dp_tx now returns 0 for the auth frame but the ap still stays silent.
+# Print the wbm release ring on every completion pass so an empty ring (firmware
+# never consumed the tcl entry) is distinguishable from a drop reason.
+python3 "$root/tools/dp-tx-compl-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
