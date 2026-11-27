@@ -209,6 +209,10 @@ python3 "$root/tools/mgmt-tx-align.py" "$DEST"
 # and the vdev could disagree on the channel while chanfreq stayed 0.  Report
 # the bound channel and hand it to the firmware.
 python3 "$root/tools/mgmt-tx-freq.py" "$DEST"
+# r606: r605 read the channel from the driver's chanctx copy and found it
+# empty.  Take mac80211's own chandef instead, and name the pdev the vdev
+# lives on.
+python3 "$root/tools/mgmt-tx-bss-chan.py" "$DEST"
 # r602: r601 aligns the frame and shows a well-formed auth header, yet the
 # firmware neither transmits nor complains.  Print the vdev/chanctx state the
 # command is judged against and give chanfreq the vdev's channel instead of 0.
