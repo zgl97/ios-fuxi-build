@@ -241,6 +241,13 @@ python3 "$root/tools/control-stage-log.py" "$DEST"
 python3 "$root/tools/keep-netdev-open.py" "$DEST"
 python3 "$root/tools/sheng-info-retry.py" "$DEST"
 python3 "$root/tools/vdev-delete-diag.py" "$DEST"
+# r603: r602 shows the vdev created, started and fw_started while the firmware
+# neither transmits the authentication frame nor reports completion.  Clean the
+# cache for DMA-to-device buffers the way arm64 dma_map_single() does, and dump
+# the whole WMI_MGMT_TX_SEND command so the next round can tell a stale frame
+# from a rejected command.
+python3 "$root/tools/dma-cache-clean.py" "$DEST"
+python3 "$root/tools/mgmt-tx-cmdbuf.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
 
 stage 'prepare.sh'
