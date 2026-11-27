@@ -203,6 +203,10 @@ python3 "$root/tools/mgmt-rx-log.py" "$DEST"
 # timeouts (errno 60).  Log every control request/result plus the session
 # open/close paths so the handler that wedges the worker names itself.
 python3 "$root/tools/control-request-log.py" "$DEST"
+# r593: op 1 is INFO, so r592's trace means the second client wedges inside its
+# first INFO (dev_open under rtnl_lock, then the handler under the wiphy lock).
+# Stamp the stages so the log shows whether dev_open or the handler blocks.
+python3 "$root/tools/control-stage-log.py" "$DEST"
 python3 "$root/tools/sheng-info-retry.py" "$DEST"
 python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
