@@ -197,6 +197,12 @@ python3 "$root/tools/vdev-setup-timeout.py" "$DEST"
 # both vdev teardown paths so the console shows when vdev 0 disappears.
 python3 "$root/tools/vdev-start-cmd-diag.py" "$DEST"
 python3 "$root/tools/mgmt-rx-log.py" "$DEST"
+# r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
+# the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
+# control socket answers nothing, so 26 wpa restarts each burn eight INFO
+# timeouts (errno 60).  Log every control request/result plus the session
+# open/close paths so the handler that wedges the worker names itself.
+python3 "$root/tools/control-request-log.py" "$DEST"
 python3 "$root/tools/sheng-info-retry.py" "$DEST"
 python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
