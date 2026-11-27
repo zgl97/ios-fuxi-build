@@ -207,6 +207,10 @@ python3 "$root/tools/control-request-log.py" "$DEST"
 # first INFO (dev_open under rtnl_lock, then the handler under the wiphy lock).
 # Stamp the stages so the log shows whether dev_open or the handler blocks.
 python3 "$root/tools/control-stage-log.py" "$DEST"
+# r594: the second client's INFO wedges inside dev_open, because the session
+# close before it called dev_close() on a vdev r590 started in add_interface().
+# Keep the netdev up across clients instead of re-entering op_start.
+python3 "$root/tools/keep-netdev-open.py" "$DEST"
 python3 "$root/tools/sheng-info-retry.py" "$DEST"
 python3 "$root/tools/vdev-delete-diag.py" "$DEST"
 NW_SKIP_SOURCE_LOCK=1 python3 "$DEST/tools/fetch-sources.py" --check
