@@ -155,6 +155,12 @@ python3 "$root/tools/reg-scan-chan-list-guard.py" "$DEST"
 # the first WMI_VDEV_START lands on a live vdev instead of the one the scan
 # just tore down (that unanswered command jammed every later WMI command).
 python3 "$root/tools/vdev-start-on-add.py" "$DEST"
+# r598: r597 proved only the first WMI_VDEV_START of the boot is answered; the
+# later ones (at authentication) are dropped while mac80211 waits 15 s and then
+# gives up on the channel, so no auth frame is ever built.  Track the firmware
+# side in arvif->fw_started, reuse a vdev that is still running, and put r590's
+# early start on 2417 MHz (where both "409" BSSes live).
+python3 "$root/tools/vdev-start-skip.py" "$DEST"
 python3 "$root/tools/scan-event-log.py" "$DEST"
 # r575: r574 booted, wpa's INFO timed out three times, and every "Remove
 # interface en0 from radio" killed the scan that was already running on vdev 0:
