@@ -263,6 +263,13 @@ python3 "$root/tools/dp-rx-ring-log.py" "$DEST"
 python3 "$root/tools/dp-rx-funnel-log.py" "$DEST"
 python3 "$root/tools/mgmt-consumed-log.py" "$DEST"
 python3 "$root/tools/htt-filter-log.py" "$DEST"
+# r613: r612 found the RX rings polled but silent -- 150 polls over rings
+# 0..3 with zero MSDUs delivered, and every beacon came up through the WMI
+# mgmt-rx path instead of the data path.  So ask the two rings directly:
+#   reo-ring-state -- does FW ever write the REO destination ring (hp moves)
+#   refill-state   -- does FW ever consume the RXDMA buffers (src tp moves)
+python3 "$root/tools/reo-ring-state.py" "$DEST"
+python3 "$root/tools/refill-state.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
