@@ -336,6 +336,12 @@ python3 "$root/tools/wbm-idle-log.py" "$DEST"
 # HP/TP addresses it was told.  If those do not match what the host
 # programmed, the firmware fetches buffers from nowhere and RX stays dead.
 python3 "$root/tools/htt-srng-log.py" "$DEST"
+# r631: REO only delivers a peer's frames if the peer was told which ring to
+# use, and that mapping is written exactly once, in ath12k_dp_peer_setup().
+# Print the routing command, its reo_dest and the reorder queue loop result:
+# a peer with no destination leaves every RX ring empty however often the
+# host re-arms it.
+python3 "$root/tools/peer-reo-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
