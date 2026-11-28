@@ -278,6 +278,10 @@ python3 "$root/tools/rx-init-summary.py" "$DEST"
 #   refill-state   -- does FW ever consume the RXDMA buffers (src tp moves)
 python3 "$root/tools/reo-ring-state.py" "$DEST"
 python3 "$root/tools/refill-state.py" "$DEST"
+# r616: r615 proved replenish() does run (steps 0x1f) yet not one buffer
+# is ever posted, so stash the first call's num_free/req/num_remain and
+# print them later, from a point the lossy console does not eat.
+python3 "$root/tools/refill-summary.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
