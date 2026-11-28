@@ -299,6 +299,10 @@ python3 "$root/tools/reo-mem-dump.py" "$DEST"
 # A base that reads back equal means the register window works and the ring
 # was simply never fed; a zero base means our write32 path never landed.
 python3 "$root/tools/reo-reg-readback.py" "$DEST"
+
+# r622: which dst rings got a hw init, and what the ring registers read
+# back once the firmware is up. The bitmask survives the lossy console.
+python3 "$root/tools/srng-map-dump.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
