@@ -322,6 +322,10 @@ python3 "$root/tools/reo-reenable.py" "$DEST"
 # r627: the destination rings stay empty even with the REO block enabled, so
 # read the two rings the hardware uses to hand frames back or drop them.
 python3 "$root/tools/rx-release-log.py" "$DEST"
+#
+# r628: the firmware init resets the receive block, so arm every ring we own
+# again after it is up and hand the hardware a fresh set of buffers.
+python3 "$root/tools/rx-restart.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
