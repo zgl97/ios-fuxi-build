@@ -342,6 +342,12 @@ python3 "$root/tools/htt-srng-log.py" "$DEST"
 # a peer with no destination leaves every RX ring empty however often the
 # host re-arms it.
 python3 "$root/tools/peer-reo-log.py" "$DEST"
+
+# r632: what we actually tell the firmware -- per-vdev parameters
+# (RX decap / filter) and the resource config TLV inside WMI_INIT_CMDID.
+# Every host-side RX precondition reads back clean (r611-r631), so the
+# remaining suspicion is a parameter the firmware dislikes.
+python3 "$root/tools/wmi-param-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
