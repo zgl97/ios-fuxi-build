@@ -309,6 +309,11 @@ python3 "$root/tools/srng-map-dump.py" "$DEST"
 # read after init, and dump the whole ring-bank window instead of guessing
 # which register holds which ring.
 python3 "$root/tools/reo-bank-dump.py" "$DEST"
+#
+# r625: the rings were armed before the firmware init and the bank dump shows
+# only ring 0 still holding its base.  Arm all eight again after unified ready
+# and read each base register straight back.
+python3 "$root/tools/reo-ring-rearm.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
