@@ -331,6 +331,11 @@ python3 "$root/tools/rx-restart.py" "$DEST"
 # receive block is dead upstream of descriptor memory; if it moves, the
 # descriptors are flowing and the fault is back in RXDMA.
 python3 "$root/tools/wbm-idle-log.py" "$DEST"
+# r630: the firmware only learns about the refill ring from an HTT srng
+# setup command, so print the ring type, id, entry count and the base and
+# HP/TP addresses it was told.  If those do not match what the host
+# programmed, the firmware fetches buffers from nowhere and RX stays dead.
+python3 "$root/tools/htt-srng-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
