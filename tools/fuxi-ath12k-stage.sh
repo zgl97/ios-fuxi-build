@@ -348,6 +348,12 @@ python3 "$root/tools/peer-reo-log.py" "$DEST"
 # Every host-side RX precondition reads back clean (r611-r631), so the
 # remaining suspicion is a parameter the firmware dislikes.
 python3 "$root/tools/wmi-param-log.py" "$DEST"
+
+# r633: the firmware keeps its own MAC counters.  Ask for them right after
+# the station is removed (auth attempt failed) so we can tell whether the
+# air ever carried the AP response or the firmware saw it and never handed
+# it to us.  rx_frame_count vs the beacon baseline is the discriminator.
+python3 "$root/tools/fw-stats-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
