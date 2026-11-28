@@ -251,6 +251,18 @@ python3 "$root/tools/dp-tx-ring-throttle.py" "$DEST"
 # nothing there means the firmware discarded the auth response itself.
 python3 "$root/tools/mac-bytes-log.py" "$DEST"
 python3 "$root/tools/dp-rx-fc-log.py" "$DEST"
+# r612: the r611 round proved the uplink works (AP acked the auth frame)
+# and killed the address theory, but the downlink side is still blind: the
+# WMI mgmt rx event only ever carried beacons, and r611's funnel probe was
+# silent whether the funnel ran zero times or a few times.  Four probes:
+#   dp-rx-ring-log      -- is the WiFi7 RX ring polled at all
+#   dp-rx-funnel-log    -- what does the firmware actually hand up, and how
+#   mgmt-consumed-log   -- firmware says it ate a mgmt frame instead
+#   htt-filter-log      -- which frame types the RX ring was told to accept
+python3 "$root/tools/dp-rx-ring-log.py" "$DEST"
+python3 "$root/tools/dp-rx-funnel-log.py" "$DEST"
+python3 "$root/tools/mgmt-consumed-log.py" "$DEST"
+python3 "$root/tools/htt-filter-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
