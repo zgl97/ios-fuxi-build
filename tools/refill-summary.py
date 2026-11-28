@@ -30,6 +30,14 @@ DECL = (
     "\n/* r616: what the first refill pass saw, for a later quiet-time print */\n"
     "static u32 dbg_rf_calls, dbg_rf_ring, dbg_rf_nf, dbg_rf_req, dbg_rf_rem;\n"
     "static u32 dbg_rf_hp, dbg_rf_tp;\n"
+    "static unsigned long long dbg_rf_lo, dbg_rf_hi;\n"
+    "/* r618: the device writes each REO dst ring's HP into the wrp window; report\n"
+    " * the address it would write to, not the shadow value.\n"
+    " */\n"
+    "#define NWDIAG_REO_HP(i) \\\n"
+    "  ((unsigned long long)(ab->hal.wrp.paddr + \\\n"
+    "   ((unsigned long)ab->hal.srng_list[ath12k_ab_to_dp(ab)->reo_dst_ring[i].ring_id] \\\n"
+    "    .u.dst_ring.hp_addr - (unsigned long)ab->hal.wrp.vaddr)))\n"
 )
 
 CAPTURE = (
@@ -51,10 +59,32 @@ CAPTURE_REM = (
     "\tdbg_rf_rem = num_remain;\n"
 )
 
+# r617's per-buffer prints were eaten by the lossy console, so keep the span in
+# statics and let the late summary carry it instead.
+BUF_SPAN = (
+    "\t\t{\n"
+    "\t\t\tunsigned long long dbg_pa = (unsigned long long)paddr;\n"
+    "\t\t\tunsigned long long dbg_end = dbg_pa + skb->len + skb_tailroom(skb);\n"
+    "\n"
+    "\t\t\tif (!dbg_rf_lo || dbg_pa < dbg_rf_lo)\n"
+    "\t\t\t\tdbg_rf_lo = dbg_pa;\n"
+    "\t\t\tif (dbg_end > dbg_rf_hi)\n"
+    "\t\t\t\tdbg_rf_hi = dbg_end;\n"
+    "\t\t}\n"
+)
+
 SUMMARY = (
     '\tath12k_info(ab, "' + MARK + ' calls %u ring %u nf %u req %u rem %u"\n'
     '\t\t    " hp %u hwtp %u\\n", dbg_rf_calls, dbg_rf_ring, dbg_rf_nf,\n'
     '\t\t    dbg_rf_req, dbg_rf_rem, dbg_rf_hp, dbg_rf_tp);\n'
+    '\tath12k_info(ab, "' + MARK + ' buf lo 0x%llx hi 0x%llx\\n",\n'
+    '\t\t    dbg_rf_lo, dbg_rf_hi);\n'
+    '\tath12k_info(ab, "' + MARK + ' dma rdp 0x%llx wrp 0x%llx\\n",\n'
+    '\t\t    (unsigned long long)ab->hal.rdp.paddr,\n'
+    '\t\t    (unsigned long long)ab->hal.wrp.paddr);\n'
+    '\tath12k_info(ab, "' + MARK + ' reo hp 0x%llx 0x%llx 0x%llx 0x%llx\\n",\n'
+    '\t\t    NWDIAG_REO_HP(0), NWDIAG_REO_HP(1), NWDIAG_REO_HP(2),\n'
+    '\t\t    NWDIAG_REO_HP(3));\n'
 )
 
 NOW = (
@@ -122,6 +152,8 @@ def main():
             ("\tnum_free = ath12k_hal_srng_src_num_free(ab, srng, true);\n",
              CAPTURE, False),
             ("\tif (!num_remain)\n\t\tgoto out;\n", CAPTURE_REM, True),
+            ("\t\tath12k_hal_rx_buf_addr_info_set(dp->hal, desc, paddr, cookie,\n"
+             "\t\t\t\t\t\tmgr);\n", BUF_SPAN, True),
             (pdev_sig, SUMMARY, False),
         ]),
         (wifi7, [
