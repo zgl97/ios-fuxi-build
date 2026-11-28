@@ -19,8 +19,11 @@ import pathlib
 MARK = "NWDIAG reo reg"
 
 LATE_READBACK = (
+    # Inside ath12k_dp_rx_pdev_alloc() `dp` is the pdev dp, not the base dp, so
+    # reach the REO rings through ath12k_ab_to_dp().
     "\t{\n"
-    "\t\tstruct dp_srng *dbg_r = &dp->reo_dst_ring[0];\n"
+    "\t\tstruct ath12k_dp *dbg_dp = ath12k_ab_to_dp(ab);\n"
+    "\t\tstruct dp_srng *dbg_r = &dbg_dp->reo_dst_ring[0];\n"
     "\t\tstruct hal_srng *dbg_s = &ab->hal.srng_list[dbg_r->ring_id];\n"
     "\t\tu32 dbg_win = ath12k_hif_read32(ab, 0x310c);\n"
     "\t\tu32 dbg_rb = ath12k_hif_read32(ab,\n"
