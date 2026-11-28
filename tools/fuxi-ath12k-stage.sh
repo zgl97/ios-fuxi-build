@@ -282,6 +282,11 @@ python3 "$root/tools/refill-state.py" "$DEST"
 # is ever posted, so stash the first call's num_free/req/num_remain and
 # print them later, from a point the lossy console does not eat.
 python3 "$root/tools/refill-summary.py" "$DEST"
+# r617: r616 cleared refill (511 buffers posted) but the RXDMA tail stops at 286
+# and the REO rings never move, so check the two things that can still be wrong
+# at that point: the buffer addresses handed to RXDMA, and each REO ring's base
+# plus hardware HP address (printed by the widened reo-ring-state).
+python3 "$root/tools/rx-buf-addr-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO

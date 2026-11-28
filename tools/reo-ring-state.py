@@ -38,11 +38,13 @@ BLOCK = (
     "\t\tdbg_reo++;\n"
     "\t\tif (dbg_reo <= 5 || !(dbg_reo & 63))\n"
     "\t\t\tath12k_info(ab,\n"
-    '\t\t\t\t    "NWDIAG reo ring n %u ring %d reaped %d tp %u chp %u hwhp %u reo_rx %u err %u\\n",\n'
+    '\t\t\t\t    "NWDIAG reo ring n %u ring %d reaped %d tp %u chp %u hwhp %u reo_rx %u err %u base 0x%llx hpr 0x%llx\\n",\n'
     "\t\t\t\t    dbg_reo, ring_id, total_msdu_reaped,\n"
     "\t\t\t\t    srng->u.dst_ring.tp, srng->u.dst_ring.cached_hp,\n"
     "\t\t\t\t    dbg_hw_hp, dp->device_stats.reo_rx[ring_id][dp->device_id],\n"
-    "\t\t\t\t    dp->device_stats.hal_reo_error[ring_id]);\n"
+    "\t\t\t\t    dp->device_stats.hal_reo_error[ring_id],\n"
+    "\t\t\t\t    (unsigned long long)srng->ring_base_paddr,\n"
+    "\t\t\t\t    (unsigned long long)ath12k_hal_srng_get_hp_addr(ab, srng));\n"
     "\t}\n"
 )
 
