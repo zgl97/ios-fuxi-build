@@ -65,10 +65,10 @@ NOW = (
     "\n"
     "\t\tdbg_rs++;\n"
     "\t\tif (dbg_rs == 200 || dbg_rs == 1000 || !(dbg_rs & 2047))\n"
-    "\t\t\tath12k_info(ab, \"" + MARK_NOW + " n %u ring %u hp %u tp %u hwtp %u\\n\",\n"
+    "\t\t\tath12k_info(ab, \"" + MARK_NOW + " n %u ring %u hp %u tp %u nf %d\\n\",\n"
     "\t\t\t\t    dbg_rs, dbg_rrid, dbg_rsrng->u.src_ring.hp,\n"
-    "\t\t\t\t    dbg_rsrng->u.src_ring.tp,\n"
-    "\t\t\t\t    *dbg_rsrng->u.src_ring.tp_addr);\n"
+    "\t\t\t\t    *dbg_rsrng->u.src_ring.tp_addr,\n"
+    "\t\t\t\t    ath12k_hal_srng_src_num_free(ab, dbg_rsrng, true));\n"
     "\t}\n"
 )
 
