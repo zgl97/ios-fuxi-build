@@ -263,6 +263,10 @@ python3 "$root/tools/dp-rx-ring-log.py" "$DEST"
 python3 "$root/tools/dp-rx-funnel-log.py" "$DEST"
 python3 "$root/tools/mgmt-consumed-log.py" "$DEST"
 python3 "$root/tools/htt-filter-log.py" "$DEST"
+
+# r614: tracer bullets down the DP RX init chain -- r613 showed the refill
+# ring never received a buffer, so find out which init step is skipped.
+python3 "$root/tools/rx-init-trace.py" "$DEST"
 # r613: r612 found the RX rings polled but silent -- 150 polls over rings
 # 0..3 with zero MSDUs delivered, and every beacon came up through the WMI
 # mgmt-rx path instead of the data path.  So ask the two rings directly:
