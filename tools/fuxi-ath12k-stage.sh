@@ -293,6 +293,12 @@ python3 "$root/tools/rx-buf-addr-log.py" "$DEST"
 # non-zero words there mean the device DMA'd descriptors and only the head
 # pointer is stuck, all-zero words mean the ring was never enabled.
 python3 "$root/tools/reo-mem-dump.py" "$DEST"
+# r620: r619 finds all eight REO dst rings full of zeros, so check the layer
+# below: read back the base/size/ring-id registers the host programmed per
+# ring, and the REO global enable plus destination-ring control registers.
+# A base that reads back equal means the register window works and the ring
+# was simply never fed; a zero base means our write32 path never landed.
+python3 "$root/tools/reo-reg-readback.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
