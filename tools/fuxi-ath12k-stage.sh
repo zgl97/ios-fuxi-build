@@ -242,6 +242,15 @@ python3 "$root/tools/dp-tx-compl-log.py" "$DEST"
 python3 "$root/tools/mgmt-auth-hdr-log.py" "$DEST"
 python3 "$root/tools/mgmt-rx-hdr-log.py" "$DEST"
 python3 "$root/tools/dp-tx-ring-throttle.py" "$DEST"
+# r611: the r610 header probe printed pointers, not MACs -- this kernel's
+# kprintf shim has no %pM.  Print each byte with %02x instead, and add a
+# probe at the single DP RX funnel (ath12k_dp_rx_deliver_msdu, just before
+# ieee80211_rx_napi): r610 only watched the WMI mgmt rx event, which is one
+# of two ways a received MPDU can reach the host.  A management frame at
+# that funnel means the firmware did deliver it and the host drops it;
+# nothing there means the firmware discarded the auth response itself.
+python3 "$root/tools/mac-bytes-log.py" "$DEST"
+python3 "$root/tools/dp-rx-fc-log.py" "$DEST"
 # r592: r590 finally lands WMI_VDEV_START (154 ms, status 0) and adds en0, but
 # the very next request returns as `sheng: rpc op=0 result=-1`; from then on the
 # control socket answers nothing, so 26 wpa restarts each burn eight INFO
